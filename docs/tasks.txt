@@ -1,0 +1,4 @@
+Implement content size field for requests
+Test oob robustness, including mixed in-band/out-of-band transfers
+Implement crediting system for directly connected peers
+Prioritize traffic based on the credit level of the initiating peer

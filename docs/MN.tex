@@ -1,0 +1,147 @@
+\documentclass{article}
+\usepackage{bytefield}
+\usepackage{color}
+\begin{document}
+
+\definecolor{unusedbits}{gray}{0.8}
+
+\begin{center}
+	Metanet Packet \\
+	\begin{bytefield}{32} \\
+		\bitheader{0,7,15,23,31} \\
+		\bitbox{6}{Version} & \bitbox{1}{\tiny{D \\ B \\ C}} & \bitbox{1}{\tiny{E \\ B \\ C}} & \bitbox{8}{Opcode} & \bitbox{16}{Desination Count} \\
+		% \wordgroupl{Flags}
+		% 	\bitbox{32}{\color{unusedbits}\rule{\width}{\height}}
+		% \endwordgroupl \\
+		\wordbox{1}{Payload Length} \\
+		
+	%	\wordgroupl{160 Bytes}
+		\wordbox{5}{Source} \\
+		\wordbox{1}{OOB Return IP Address} \\
+		\bitbox{16}{OOB Return Port} & \bitbox{5}{IB Limit} & \bitbox{11}{\color{unusedbits}\rule{\width}{\height}} \\
+	%	\endwordgroupl \\
+		
+		\wordbox[lrt]{1}{Destination List} \\
+		\skippedwords \\
+		\wordbox[lrb]{1}{} \\
+		
+		\wordbox[lrt]{1}{Payload} \\
+		\skippedwords \\
+		\wordbox[lrb]{1}{} \\
+	\end{bytefield}
+	
+	Link Handshake \\
+	\begin{bytefield}{32} \\
+		\bitheader{0,7,15,23,31} \\
+		\bitbox{8}{``M''} & \bitbox{8}{``N''} & \bitbox{8}{Version} & \bitbox{5}{IB Limit} & \bitbox{3}{\color{unusedbits}\rule{\width}{\height}} \\
+		\wordbox{1}{Peer IP Address} \\
+		\wordbox{1}{Predessesor IP Address} \\
+		\wordbox{1}{Successor IP Address} \\
+		\bitbox{16}{Predessesor Port} & \bitbox{16}{Successor Port} \\
+%		\bitbox{8}{Protocol Count} & \bitbox[lrt]{24}{} \\
+%		\wordbox[lr]{1}{Supported Protocol List} \\
+%		\skippedwords \\
+%		\wordbox[lrb]{1}{} \\
+	\end{bytefield}
+	
+	Link Frame \\
+	\begin{bytefield}{32} \\
+		\bitheader{0,7,15,23,31} \\
+		\bitbox{8}{Protocol} & \bitbox{8}{Sequence} & \bitbox{16}{Payload Length}\\
+		
+		\wordbox[lrt]{1}{Payload} \\
+		\skippedwords \\
+		\wordbox[lrb]{1}{} \\
+	\end{bytefield}
+
+	Opcodes \\
+	\begin{tabular}{r|l}
+	  Opcode & Description \\
+	  \hline
+		0 & Trace Route to Name \\
+		1 & OOB Address Resolution \\
+		2 & Hunk Storage and Retrieval \\
+		3 & Credit Accounting \\
+	\end{tabular}
+	
+	Trace Route to Name Request \\
+	\begin{bytefield}{32} \\
+		\bitheader{0,7,15,23,31} \\
+		\bitbox{8}{Opcode = 0} & \bitbox[]{24}{} \\
+	\end{bytefield}
+	
+	Trace Route to Name Response \\
+	\begin{bytefield}{32} \\
+		\bitheader{0,7,15,23,31} \\
+		\bitbox{8}{Opcode = 1} & \bitbox{8}{\color{unusedbits}\rule{\width}{\height}} & \bitbox{16}{Node Port} \\
+		\wordbox{1}{Node IP Address} \\
+	\end{bytefield}
+	
+	Hunk Request (Non-Authoritative) \\
+	\begin{bytefield}{32} \\
+		\bitheader{0,7,15,23,31} \\
+		\bitbox{8}{Opcode = 0} & \bitbox{8}{Hit Limit} & \bitbox{16}{\color{unusedbits}\rule{\width}{\height}} \\
+		\wordbox{1}{Maximum Hunk Size} \\
+	\end{bytefield}
+	
+%	OOB Address \\
+%	\begin{bytefield}{32} \\
+%		\bitheader{0,7,15,23,31} \\
+%		\bitbox{8}{Transport Type} & \bitbox{8}{Address Length} & \bitbox{16}{\color{unusedbits}\rule{\width}{\height}} \\
+%		\wordbox[lrt]{1}{Address} \\
+%		\skippedwords \\
+%		\wordbox[lrb]{1}{} \\
+%	\end{bytefield}
+	
+	Hunk Transfer (Non-Authoritative) \\
+	\begin{bytefield}{32} \\
+		\bitheader{0,7,15,23,31} \\
+		\bitbox{8}{Opcode = 1} & \bitbox{8}{Hunk Count} & \bitbox{16}{\color{unusedbits}\rule{\width}{\height}} \\
+		\wordbox[lrt]{1}{Hunk List} \\
+		\skippedwords \\
+		\wordbox[lrb]{1}{} \\
+	\end{bytefield}
+	
+	Hunk (Non-Authoritative) \\
+	\begin{bytefield}{32} \\
+		\bitheader{0,7,15,23,31} \\
+		\wordbox{1}{Content Length} \\
+		\wordbox[lrt]{1}{Content} \\
+		\skippedwords \\
+		\wordbox[lrb]{1}{} \\
+	\end{bytefield}
+	
+	Hunk Request (Authoritative) \\
+	\begin{bytefield}{32} \\
+		\bitheader{0,7,15,23,31} \\
+		\bitbox{8}{Opcode = 2} & \bitbox{8}{Hit Limit} & \bitbox{16}{\color{unusedbits}\rule{\width}{\height}} \\
+		\wordbox{5}{Authority Name} \\
+	\end{bytefield}
+	
+	Hunk Transfer (Authoritative) \\
+	\begin{bytefield}{32} \\
+		\bitheader{0,7,15,23,31} \\
+		\bitbox{8}{Opcode = 3} & \bitbox{8}{Hunk Count} & \bitbox{16}{Authority Key Length} \\
+		\wordbox[lrt]{1}{Authority Key} \\
+		\skippedwords \\
+		\wordbox[lrb]{1}{} \\
+		\wordbox[lrt]{1}{Hunk List} \\
+		\skippedwords \\
+		\wordbox[lrb]{1}{} \\
+	\end{bytefield}
+	
+	Hunk (Authoritative) \\
+	\begin{bytefield}{32} \\
+		\bitheader{0,7,15,23,31} \\
+		\bitbox{8}{Signature Type} & \bitbox{8}{\color{unusedbits}\rule{\width}{\height}} & \bitbox{16}{Signature Length} \\
+		\wordbox{1}{Content Length} \\
+		\wordbox[lrt]{1}{Content} \\
+		\skippedwords \\
+		\wordbox[lrb]{1}{} \\
+		\wordbox[lrt]{1}{Signature} \\
+		\skippedwords \\
+		\wordbox[lrb]{1}{} \\
+	\end{bytefield}
+\end{center}
+
+\end{document}

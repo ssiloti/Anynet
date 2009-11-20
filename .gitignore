@@ -1,0 +1,14 @@
+Debug
+Release
+*.ncb
+*.suo
+*.user
+*.aux
+*.bbl
+*.blg
+*.log
+*.pdf
+*.conf
+envs
+bin
+obj

@@ -1,0 +1,134 @@
+// anynet
+// Copyright (C) 2009  Steven Siloti
+//
+// This program is free software; you can redistribute it and/or
+// modify it under the terms of the GNU General Public License
+// as published by the Free Software Foundation; either version 2
+// of the License, or (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program; if not, write to the Free Software
+// Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+//
+// In addition, as a special exception, the copyright holders give
+// permission to link the code of portions of this program with the
+// OpenSSL library under certain conditions as described in each
+// individual source file, and distribute linked combinations
+// including the two.
+//
+// You must obey the GNU General Public License in all respects
+// for all of the code used other than OpenSSL.  If you modify
+// file(s) with this exception, you may extend this exception to your
+// version of the file(s), but you are not obligated to do so.  If you
+// do not wish to do so, delete this exception statement from your
+// version.  If you delete this exception statement from all source
+// files in the program, then also delete it here.
+//
+// Contact:  Steven Siloti <ssiloti@gmail.com>
+
+#ifndef CORE_HPP
+#define CORE_HPP
+
+#include <glog/logging.h>
+
+#include "link.hpp"
+#include <boost/cstdint.hpp>
+#include <boost/asio/buffer.hpp>
+#include <boost/interprocess/mapped_region.hpp>
+#include <boost/date_time/posix_time/posix_time_types.hpp>
+#include <boost/smart_ptr.hpp>
+#include <vector>
+#include <set>
+
+using boost::asio::const_buffer;
+using boost::asio::mutable_buffer;
+using boost::asio::const_buffers_1;
+using boost::asio::mutable_buffers_1;
+using boost::asio::buffer_cast;
+using boost::asio::buffer_size;
+using boost::asio::buffer;
+
+typedef boost::uint8_t protocol_t;
+
+class network_key;
+
+class payload_buffer
+{
+public:
+	virtual mutable_buffer get() = 0;
+	virtual const_buffer get() const = 0;
+	virtual ~payload_buffer() {}
+};
+
+class heap_buffer : public payload_buffer
+{
+public:
+	heap_buffer(std::size_t size) : buffer_(size) {}
+	void resize(std::size_t new_size) { buffer_.resize(new_size); }
+
+	virtual mutable_buffer get() { return buffer(buffer_); }
+	virtual const_buffer get() const { return buffer(buffer_); }
+private:
+	std::vector<boost::uint8_t> buffer_;
+};
+
+typedef boost::shared_ptr<payload_buffer> payload_buffer_ptr;
+typedef boost::shared_ptr<const payload_buffer> const_payload_buffer_ptr;
+
+extern const network_key key_max;
+
+class rolling_stats
+{
+public:
+	rolling_stats() : mean_(0.0), var_(0.0), stddev_(0.0), count_(0) {}
+
+	void add(double new_val)
+	{
+		++count_;
+		double delta = new_val - mean_;
+		mean_ += delta / count_;
+		var_ = ((count_-1)*var_ + delta * (new_val - mean_)) / count_;
+		stddev_ = std::sqrt(var_);
+	}
+
+	void remove(double old_val)
+	{
+        --count_;
+		if (count_ == 0) {
+            mean_ = 0;
+            var_ = 0;
+            stddev_ = 0;
+		}
+		else {
+            double delta = old_val - mean_;
+            mean_ = mean_ - delta / count_;
+            var_ = ((count_+1)*var_ - delta*(old_val - mean_)) / count_;
+			stddev_ = std::sqrt(var_);
+		}
+	}
+
+	void update(double old_val, double new_val)
+	{
+        double newdelta = new_val - mean_;
+        double olddelta = old_val - mean_;
+        double oldmean = mean_ - olddelta / count_;
+        mean_ = oldmean + newdelta / count_;
+        var_ = (count_*var_ - olddelta*(old_val - oldmean) + newdelta * (new_val - mean_)) / count_;
+		stddev_ = std::sqrt(var_);
+	}
+
+	double mean() { return mean_; }
+	double var() { return var_; }
+	double stddev() { return stddev_; }
+
+private:
+	double mean_, var_, stddev_;
+	int count_;
+};
+
+#endif

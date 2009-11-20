@@ -1,0 +1,47 @@
+Anynet - Technical overview
+
+Anynet is a general purpose, P2P, content distribution protocol. It is designed to achieve high performance and efficiency by caching content at multiple points in the network. The name comes from the fact that the routing scheme used is similar to the anycast scheme sometimes used to enable efficient load ballancing using conventional internet protocols.
+
+Design principals
+
+- Allow content to be routed directly over the network, but only if it is small enough to be sent without significant delay. Content which it determined to be too large must instead be routed as a list of IP addresses for nodes who can supply the content if connected to directly. Moreover, it should be possible to switch between these two modes of transport on a per-hop basis. The aim of this scheme is to allow nodes with faster connections to act as caching proxies, taking as much burden off of slower nodes as possible without overburdening the faster nodes. At the extreme end it is envisioned this would allow the potential for ISPs to set up nodes which act as dedicated proxies for their users. These nodes would provide users with high speed access to cached content and releive them of having to serve content to other nodes. They could even make use of the ISP's routing tables to establish efficient routing to similar nodes on peered networks. More realisticaly, 3rd parties could provide a similar service for a fee, similar to existing seedbox services for the bittorrent protocol but more general use.
+
+- All nodes and content share the same namespace. As is typical for content addressable P2P networks, both nodes and content are refered to with a fixed size numerical value (read: a hash).
+
+- Allow published content to exist indepent of any single node. Once content is inserted into the network it will continue to be accessable so long as at least one node stores it.
+
+- 
+
+Basic concepts
+
+Node - A node is an autononmous system which participates in the routing of traffic throughout the network.
+
+Link - Nodes are connected to eachother via links. Typically this will be a TCP/IP connection. There are three types of links which are defined:
+
+1. In-band - Allows all network traffic to be both sent and received.
+2. Out-of-band - Only messages which are either directly addressed to or directly satisfiable by the remote node are allowed. All other messages will be returned with an error.
+3. Gateway - Allows messages from the remote node to be forwarded but will only forward messages to it if they are directly addressed to the remote node. This is intended for use by ISPs or 3rd parties who provide access to the network without requiring their clients to handle unsolicited traffic.
+
+Frame - In the case of TCP/IP, once a link is established a stream of frames is exchanged between the two connected nodes. Frames begin with a single octet which identifies the frame type. The length of a frame is determined from its type or content.
+
+Hunk - Content is transfered in the form of individually addressable hunks. A hunk can range in size from 1 byte to 4 GiB, although it is anticipated that bulk content will be split into smaller fixed size hunks for efficiency. Each hunk is identified by a hash value derived from its content. The exacct means of computing this hash can varry deppending on the protocol, see below.
+
+Identity - Both nodes and hunks are referred to by their network id, a large fixed-size integer. As of network protocol version 0 this id is 256 bits long.
+
+Protocol - Hunks can have different formats which potentially impact how the hunk is identified and handled by nodes. These formats are refered to as protocols. Nodes are only allowed to handle hunks who's protocol they understand.
+
+Message - Communications over the network are made in the form of messages. Every message is associated with a single hunk id and a destination id, the two can potentially be the same. A message will either carry the contents of a hunk, meta-data pertaining to a hunk, or a request for a hunk. Uppon reciept a node will, among other things, forward the message to an apporiate peer (as defined by the routing rules below) if a link to such a peer exists.
+
+Distance - The distance between a node an a message's destination is a key element for routing. The distance between a node and a message's destination is defined as the difference d - n where d is the desination id and n is the node id. This difference is computed using modular arithmetic with modulus equal to the largest possible id (2^256-1).
+
+Routing rules
+
+The rules governing how nodes route messages are deliberately permissive. In fact there is only a single rule. It is expected that the details of nodes' routing schemes will differ depending on what arrangments, if any, have been made in establishing their links. Any routing scheme is permitted to be used so long as it obeys the following rule:
+
+- A message must only be forwarded to another node if the forwarding node's id is closer than that of the sending node to the message's destination, or the message is recognised by the forwarding node as a response to a previously seen request.
+
+The exception for request responses above is intended to allow nodes to leave "bread crumbs" recording a request for a particular hunk id from a particular node id. Then once the request is satisfied the nodes which saw the request will attempt to forward the response back along the same route. This is done for two reasons:
+
+1. It allows for nodes to keep watch over their neighbors, specifically to recognize if one of them is consistantly failing to satisfy requests.
+
+2. It allows for efficient passive caching of content. By sending content allong the same route as was taken by the corresponding request we maximize the probability that the intermediate nodes will be able to satisfy future requsts by caching it.

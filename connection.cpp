@@ -259,13 +259,13 @@ void connection::send(const packet::ptr_t pkt)
 	// content is detached but it is small enough to send attached
 	// instead of sending this packet we will start up a local request for the content
 	// then send it attached
-/*	if (pkt->content_status() == packet::content_detached && pkt->sources()->size <= oob_threshold()) {
+	if (pkt->content_status() == packet::content_detached && pkt->sources()->size <= oob_threshold()) {
 		node_.get_protocol(pkt).new_content_request(pkt->source(), pkt->destination());
 		return;
-	}*/
+	}
 
 	// content is attached but it's too big for this peer's oob threshold, detach it and list ourselves as a source
-	if (pkt->content_status() == packet::content_attached /*&& buffer_size(pkt->payload()->get()) > oob_threshold() && pkt->destination() != remote_id()*/) {
+	if (pkt->content_status() == packet::content_attached && buffer_size(pkt->payload()->get()) > oob_threshold() && pkt->destination() != remote_id()) {
 		content_sources::ptr_t self_source(new content_sources(buffer_size(pkt->payload()->get())));
 		self_source->sources.insert(std::make_pair(node_.public_endpoint(), content_sources::source()));
 		pkt->detach_content(self_source);

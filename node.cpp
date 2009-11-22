@@ -743,7 +743,7 @@ void local_node::update_threshold_stats()
 			min_oob_threshold_ = ((*peer)->oob_threshold());
 		if ((*peer)->oob_threshold() > max_oob_threshold_)
 			max_oob_threshold_ = ((*peer)->oob_threshold());
-		sum += ((*peer)->oob_threshold();
+		sum += ((*peer)->oob_threshold());
 	}
 
 	avg_oob_threshold_ = sum / ib_peers_.size();

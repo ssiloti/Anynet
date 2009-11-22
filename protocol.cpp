@@ -209,16 +209,18 @@ framented_content::fragment_buffer network_protocol::get_fragment_buffer(frame_f
 
 void network_protocol::new_content_request(const network_key& key, const content_request::keyed_handler_t& handler)
 {
-	std::pair<response_handlers_t::iterator, bool> rh = response_handlers_.insert(std::make_pair(key, boost::shared_ptr<response_handler>())));
+	std::pair<response_handlers_t::iterator, bool> rh = response_handlers_.insert(std::make_pair(key, boost::shared_ptr<response_handler>()));
 
 	if (rh.second) {
 		rh.first->second.reset(new response_handler(node_.io_service()));
-		rh.first->second->timeout.async_wait(boost::bind(&network_protocol::remove_response_handler, shared_from_this(), inserted.first->first, placeholders::error));
-		rh.first->second->request.initiate_request(id(), key, node_);
+		rh.first->second->timeout.async_wait(boost::bind(&network_protocol::remove_response_handler, shared_from_this(), rh.first->first, placeholders::error));
 	}
 
 	if (handler)
-		rh->second->request.add_handler(handler);
+		rh.first->second->request.add_handler(handler);
+
+	if (rh.second)
+		rh.first->second->request.initiate_request(id(), key, node_);
 }
 
 void network_protocol::remove_response_handler(network_key key, const boost::system::error_code& error)

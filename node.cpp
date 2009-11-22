@@ -516,16 +516,7 @@ void local_node::packet_received(connection::ptr_t con, packet::ptr_t pkt)
 		DLOG(INFO) << "No more peers left for desperation requests";
 	}
 
-	if (pkt->content_status() == packet::content_requested) {
-		// if we have a local request outstanding for this content we want to attach this remote
-		// request to it
-		// BUT, don't do it if the request was from us. In that case the sender must be in desperation
-		// for our own request. If we link such a request into ours it will create a deadlock until the
-		// request times out.
-		if (pkt->source() != id() && protocol.attach_remote_request_handler(pkt->destination(), pkt->source()))
-			return;
-	}
-	else {
+	if (pkt->content_status() != packet::content_requested) {
 		connection::ptr_t con = protocol.pickup_crumb(std::make_pair(pkt->destination(), pkt->source()));
 		if (con) {
 			con->send(pkt);

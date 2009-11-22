@@ -103,13 +103,7 @@ void network_protocol::snoop_packet(packet::ptr_t pkt)
 		}
 	case packet::content_detached:
 		{
-			const_payload_buffer_ptr content = get_content(pkt->source());
-
-			if (content) {
-				pkt->content_status(packet::content_attached);
-				pkt->payload(content);
-			}
-			else if (pkt->sources()->sources.size() > 1 && pkt->source() == pkt->destination()) {
+			if (pkt->sources()->sources.size() > 1 && pkt->source() == pkt->destination()) {
 				// this is a store request and we already have other sources saved
 				// in this case we want to halt the store request so set the destination to ourselves
 				// this will prevent the packet from being forwarded to another peer
@@ -213,32 +207,18 @@ framented_content::fragment_buffer network_protocol::get_fragment_buffer(frame_f
 		return framented_content::fragment_buffer(frag->offset());
 }
 
-void network_protocol::new_content_request(const network_key& key, const network_key& requester)
-{
-	boost::shared_ptr<response_handler> rh(new response_handler(remote_request_handler(*this, requester, key), node_.io_service()));
-	std::pair<response_handlers_t::iterator, bool> inserted = response_handlers_.insert(std::make_pair(key, rh));
-
-	if (inserted.second) {
-		rh->timeout.async_wait(boost::bind(&network_protocol::remove_response_handler, shared_from_this(), inserted.first->first, placeholders::error));
-		rh->request.initiate_request(id(), key, node_);
-	}
-	else {
-		inserted.first->second->request.add_handler(remote_request_handler(*this, requester, key));
-	}
-}
-
 void network_protocol::new_content_request(const network_key& key, const content_request::keyed_handler_t& handler)
 {
-	response_handlers_t::iterator existing = response_handlers_.find(key);
-	if (existing != response_handlers_.end())
-		existing->second->request.add_handler(handler);
-	else {
-		boost::shared_ptr<response_handler> rh(new response_handler(handler, node_.io_service()));
-		std::pair<response_handlers_t::iterator, bool> inserted = response_handlers_.insert(std::make_pair(key, rh));
-		rh->timeout.async_wait(boost::bind(&network_protocol::remove_response_handler, shared_from_this(), inserted.first->first, placeholders::error));
+	std::pair<response_handlers_t::iterator, bool> rh = response_handlers_.insert(std::make_pair(key, boost::shared_ptr<response_handler>())));
 
-		rh->request.initiate_request(id(), key, node_);
+	if (rh.second) {
+		rh.first->second.reset(new response_handler(node_.io_service()));
+		rh.first->second->timeout.async_wait(boost::bind(&network_protocol::remove_response_handler, shared_from_this(), inserted.first->first, placeholders::error));
+		rh.first->second->request.initiate_request(id(), key, node_);
 	}
+
+	if (handler)
+		rh->second->request.add_handler(handler);
 }
 
 void network_protocol::remove_response_handler(network_key key, const boost::system::error_code& error)

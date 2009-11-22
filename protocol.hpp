@@ -80,7 +80,7 @@ public:
 	virtual ~network_protocol() {}
 	virtual protocol_t id() = 0;
 
-	void snoop_packet(packet::ptr_t);
+	void snoop_packet(packet::ptr_t pkt);
 	void snoop_fragment(ip::tcp::endpoint src, frame_fragment::ptr_t frag);
 
 	virtual payload_buffer_ptr get_payload_buffer(std::size_t size) = 0;
@@ -90,8 +90,7 @@ public:
 	void register_handler();
 	void start_vacume();
 
-	void new_content_request(const network_key& key, const content_request::keyed_handler_t& handler);
-	void new_content_request(const network_key& key, const network_key& requester);
+	void new_content_request(const network_key& key, const content_request::keyed_handler_t& handler = content_request::keyed_handler_t());
 	bool attach_remote_request_handler(const network_key& key, const network_key& requester);
 
 	void drop_crumb(const std::pair<network_key, network_key>& k, boost::weak_ptr<connection> c);
@@ -123,8 +122,8 @@ private:
 
 	struct response_handler
 	{
-		response_handler(content_request::keyed_handler_t h, boost::asio::io_service& ios)
-			: timeout(ios), request(h) { timeout.expires_from_now(boost::posix_time::seconds(5)); }
+		response_handler(boost::asio::io_service& ios)
+			: timeout(ios) { timeout.expires_from_now(boost::posix_time::seconds(5)); }
 		content_request request;
 		boost::asio::deadline_timer timeout;
 	};

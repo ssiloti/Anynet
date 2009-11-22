@@ -49,6 +49,7 @@ public:
 	typedef boost::function<void(const_payload_buffer_ptr)> keyed_handler_t;
 
 	content_request(const keyed_handler_t& handler) : receiving_content_(false) { add_handler(handler); }
+	content_request() : receiving_content_(false) {}
 
 	bool snoop_packet(local_node& node, packet::ptr_t pkt);
 	const_payload_buffer_ptr snoop_fragment(local_node& node, ip::tcp::endpoint src, frame_fragment::ptr_t frag);

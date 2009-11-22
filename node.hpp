@@ -111,6 +111,7 @@ public:
 	void connection_in_progress(connection::ptr_t con) { connecting_peers_.push_back(con); }
 	boost::posix_time::time_duration base_hunk_lifetime();
 	boost::posix_time::time_duration age() const { return boost::posix_time::second_clock::universal_time() - created_; }
+	std::size_t average_oob_threshold() const { return avg_oob_threshold_; }
 
 	void make_connection(ip::tcp::endpoint peer);
 
@@ -207,7 +208,7 @@ private:
 	boost::posix_time::ptime created_;
 	content_sources_t content_sources_;
 
-	std::size_t min_oob_threshold_, max_oob_threshold_;
+	std::size_t min_oob_threshold_, max_oob_threshold_, avg_oob_threshold_;
 };
 
 inline bool operator==(local_node::oob_peer::ptr_t l, connection::ptr_t r) { return r == l->con; }

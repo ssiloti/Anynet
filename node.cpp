@@ -736,11 +736,15 @@ void local_node::update_threshold_stats()
 {
 	min_oob_threshold_ = std::numeric_limits<std::size_t>::max();
 	max_oob_threshold_ = std::numeric_limits<std::size_t>::min();
+	std::size_t sum = 0;
 
 	for (std::vector<connection::ptr_t>::iterator peer = ib_peers_.begin(); peer != ib_peers_.end(); ++peer) {
 		if ((*peer)->oob_threshold() < min_oob_threshold_)
 			min_oob_threshold_ = ((*peer)->oob_threshold());
 		if ((*peer)->oob_threshold() > max_oob_threshold_)
 			max_oob_threshold_ = ((*peer)->oob_threshold());
+		sum += ((*peer)->oob_threshold();
 	}
+
+	avg_oob_threshold_ = sum / ib_peers_.size();
 }

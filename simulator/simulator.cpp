@@ -38,7 +38,7 @@
 #include <boost/smart_ptr.hpp>
 #include <vector>
 
-const static int target_node_count = 4;
+const static int target_node_count = 10;
 
 network_simulator::network_simulator() : node_lifetime_(rng_, boost::lognormal_distribution<>(600, 200)),
 	  insert_non_authoritative_interval_(rng_, boost::lognormal_distribution<>(200, 10)),
@@ -66,33 +66,13 @@ void network_simulator::tick(const boost::system::error_code& error)
 
 		if (clients.size() < target_node_count) {
 			clients.push_back(boost::shared_ptr<traffic_generator>(new traffic_generator(io_service, clients.size())));
-			// for now we don't want to have to deal with requests getting randomly dropped due to churn
-			// but the network design requires churn to trigger it's healing
-			// as a temporary hack force all the nodes to heal once they have been added
-	//		if (clients.size() == target_node_count) {
-	//			next_heal_client_ = clients.begin();
-	//		}
-	//		else {
-	//			next_heal_client_ = clients.end();
-	//			heal_count_ = 0;
-	//		}
-	//	}
-	//	else if (next_heal_client_ != clients.end()) {
-	//		(*next_heal_client_++)->heal();
-	//	}
-	//	else if (heal_count_ != clients.size()) {
-	//		++heal_count_;
-	//		next_heal_client_ = clients.begin();
 		}
 		else {
-
-	//		++outstanding_queries;
 			for (std::vector<boost::shared_ptr<traffic_generator> >::iterator client = clients.begin(); client != clients.end(); ++client) {
 				if (!*client)
 					client->reset(new traffic_generator(io_service, std::distance(clients.begin(), client)));
 				(*client)->tick(time_);
 			}
-	//		--outstanding_queries;
 
 			for (std::vector<network_key>::iterator it = non_authoritative_hunks_.queue.begin(); it != non_authoritative_hunks_.queue.end(); ++it) {
 				non_authoritative_hunks_.active.insert(std::make_pair(*it, hunk_stats()));

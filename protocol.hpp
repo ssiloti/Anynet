@@ -84,6 +84,7 @@ public:
 	void snoop_fragment(ip::tcp::endpoint src, frame_fragment::ptr_t frag);
 
 	virtual payload_buffer_ptr get_payload_buffer(std::size_t size) = 0;
+	virtual void prune_hunk(const network_key& id) = 0;
 	framented_content::fragment_buffer get_fragment_buffer(frame_fragment::ptr_t frag);
 	content_sources::ptr_t get_content_sources(network_key id, std::size_t size);
 
@@ -103,10 +104,8 @@ protected:
 	network_protocol(local_node& node);
 
 	virtual const_payload_buffer_ptr get_content(const network_key& key) = 0;
-	virtual network_key store_content(const_payload_buffer_ptr content) = 0;
-
-//	void register_source(network_key key, ip::tcp::endpoint source, size_t hunk_size);
-//	boost::iterator_range<detached_sources_t::const_iterator> get_sources(network_key key);
+	virtual void store_content(hunk_descriptor_t desc, const_payload_buffer_ptr content) = 0;
+	virtual network_key content_id(const_payload_buffer_ptr content) = 0;
 
 	local_node& node_;
 	network_key node_id;
@@ -130,6 +129,7 @@ private:
 
 	typedef std::map<network_key, boost::shared_ptr<response_handler> > response_handlers_t;
 	typedef std::map<network_key, content_sources::ptr_t> content_sources_t;
+	typedef std::map<network_key, boost::array<boost::posix_time::ptime, 2> > content_requests_t;
 
 	void remove_response_handler(network_key key, const boost::system::error_code& error);
 
@@ -138,6 +138,7 @@ private:
 	crumbs_t crumbs_;
 	response_handlers_t response_handlers_;
 	content_sources_t content_sources_;
+	content_requests_t recent_requests_;
 	boost::asio::deadline_timer vacume_sources_;
 	bool shutting_down_;
 };

@@ -34,6 +34,7 @@
 #ifndef CONFIG_HPP
 #define CONFIG_HPP
 
+#include <boost/cstdint.hpp>
 #include <string>
 
 class client_config
@@ -44,11 +45,13 @@ public:
 	std::string listen_ip() const { return listen_ip_; }
 	unsigned short listen_port() const { return port_; }
 	std::string content_store_path() const { return content_store_path_; }
+	boost::uint64_t target_store_size() const { return store_size_; }
 
 
 	std::string content_store_path_;
 	unsigned short port_;
 	std::string listen_ip_;
+	boost::uint64_t store_size_;
 };
 
 //extern client_config config;

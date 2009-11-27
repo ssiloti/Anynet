@@ -41,6 +41,7 @@
 #include <boost/interprocess/file_mapping.hpp>
 #include <boost/interprocess/mapped_region.hpp>
 #include <boost/smart_ptr.hpp>
+#include <boost/filesystem.hpp>
 #include <cstdio>
 
 #ifdef BOOST_WINDOWS
@@ -50,6 +51,27 @@
 #endif
 
 using namespace boost::interprocess;
+
+class local_node;
+
+struct stored_hunk
+{
+	stored_hunk(protocol_t p, network_key k, std::size_t s, int closer, bool local)
+		: protocol(p), id(k), size(s), closer_peers(closer), local_requested(local),
+		last_access(boost::posix_time::second_clock::universal_time()),
+		stored(boost::posix_time::second_clock::universal_time())
+	{}
+	network_key id;
+	boost::posix_time::ptime last_access;
+	boost::posix_time::ptime stored;
+	std::size_t size;
+	int closer_peers;
+	bool local_requested;
+	protocol_t protocol;
+};
+
+typedef std::list<stored_hunk> stored_hunks_t;
+typedef stored_hunks_t::iterator hunk_descriptor_t;
 
 class content_store
 {
@@ -61,12 +83,6 @@ class content_store
 	};
 
 public:
-#ifdef BOOST_WINDOWS
-	typedef LONGLONG file_time_t;
-#else
-	typedef time_t file_time_t;
-#endif
-
 	struct mapped_content : mapped_content_base, public payload_buffer
 	{
 		friend class content_store;
@@ -110,10 +126,9 @@ public:
 
 	struct stored_content
 	{
+		stored_content(hunk_descriptor_t d) : desc(d) {}
 		boost::weak_ptr<const mapped_content> content;
-		file_time_t last_access;
-		file_time_t stored;
-		std::size_t size;
+		hunk_descriptor_t desc;
 	};
 
 private:
@@ -125,11 +140,10 @@ public:
 	typedef boost::shared_ptr<mapped_content> mapped_content_ptr;
 	typedef boost::shared_ptr<const mapped_content> const_mapped_content_ptr;
 
-	content_store(const std::string& path);
+	content_store(const std::string& path, protocol_t pid, local_node& node);
 	~content_store();
 
 	void flush();
-	file_time_t now();
 
 	const_iterator begin() const { return stored_contents_.begin(); }
 	const_iterator end() const { return stored_contents_.end(); }
@@ -139,11 +153,12 @@ public:
 	mapped_content_ptr get_temp(std::size_t size);
 
 	const_mapped_content_ptr get(const network_key& key);
-	const_mapped_content_ptr put(const network_key& key, const_buffer content);
-	const_mapped_content_ptr put(const network_key& key, mapped_content_ptr content);
+	const_mapped_content_ptr put(hunk_descriptor_t desc, const_buffer content);
+	const_mapped_content_ptr put(hunk_descriptor_t desc, mapped_content_ptr content);
 	void unlink(const network_key& key);
 
 private:
+	void load_contents(boost::filesystem::path dir_path, protocol_t pid, local_node& node);
 	std::string content_path(const network_key& key, bool create_dirs=false) const;
 	void unlink_storage(iterator content);
 

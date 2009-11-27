@@ -46,7 +46,6 @@ public:
 	traffic_generator(boost::asio::io_service& io_service, int id);
 
 	void tick(int time);
-	void heal() { node_.heal(); }
 public:
 
 	void hunk_received(const_payload_buffer_ptr content);

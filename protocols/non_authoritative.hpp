@@ -69,10 +69,17 @@ public:
 
 	virtual protocol_t id() { return protocol_id; }
 	virtual const_payload_buffer_ptr get_content(const network_key& key);
-	virtual network_key store_content(const_payload_buffer_ptr content);
+	virtual void store_content(hunk_descriptor_t desc, const_payload_buffer_ptr content);
+	virtual network_key content_id(const_payload_buffer_ptr content);
+
 	virtual payload_buffer_ptr get_payload_buffer(std::size_t size)
 	{
 		return stored_hunks_.get_temp(size);
+	}
+
+	virtual void prune_hunk(const network_key& id)
+	{
+		stored_hunks_.unlink(id);
 	}
 
 	~non_authoritative()

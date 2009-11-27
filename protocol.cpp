@@ -93,12 +93,32 @@ void network_protocol::snoop_packet(packet::ptr_t pkt)
 				break;
 			}
 
+			std::pair<content_requests_t::iterator, bool> recent = recent_requests_.insert(std::make_pair(pkt->destination(), boost::array<boost::posix_time::ptime, 2>()));
+
+			recent.first->second[1] = recent.first->second[0];
+			recent.first->second[0] = boost::posix_time::second_clock::universal_time();
+
 			DLOG(INFO) << "Couldn't locate content to satisfy request from " << std::string(pkt->source()) << " for " << std::string(pkt->destination());
 			break;
 		}
 	case packet::content_attached:
 		{
-			pkt->source(store_content(pkt->payload()));
+			hunk_descriptor_t hunk_desc;
+			pkt->source(content_id(pkt->payload()));
+			if (pkt->is_direct()) {
+				hunk_desc = node_.cache_local_request(id(), pkt->source(), buffer_size(pkt->payload()->get()));
+			}
+			else if (pkt->source() == pkt->destination())
+				hunk_desc = node_.cache_store(id(), pkt->source(), buffer_size(pkt->payload()->get()));
+			else {
+				content_requests_t::iterator recent_request = recent_requests_.find(pkt->source());
+				if (recent_request == recent_requests_.end() || recent_request->second[1].is_not_a_date_time())
+					break;
+				hunk_desc = node_.cache_remote_request(id(), pkt->source(), buffer_size(pkt->payload()->get()), recent_request->second[0] - recent_request->second[1]);
+			}
+
+			if (hunk_desc != node_.not_a_hunk())
+				store_content(hunk_desc, pkt->payload());
 			break;
 		}
 	case packet::content_detached:
@@ -151,6 +171,7 @@ void network_protocol::snoop_fragment(ip::tcp::endpoint src, frame_fragment::ptr
 				packet::ptr_t pkt(new packet());
 				pkt->protocol(id());
 				pkt->content_status(packet::content_attached);
+				pkt->mark_direct();
 				pkt->destination(node_.id());
 				pkt->payload(payload);
 				snoop_packet(pkt);

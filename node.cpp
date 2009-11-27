@@ -49,9 +49,6 @@
 local_node::local_node(boost::asio::io_service& io_service, client_config& config)
 	: config_(config), acceptor_(io_service, ip::tcp::endpoint(ip::address::from_string(config.listen_ip()), config.listen_port())),
 	  public_endpoint_(acceptor_.local_endpoint()), created_(boost::posix_time::second_clock::universal_time())
-#ifdef SIMULATION
-	  , heal_timer_(io_service)
-#endif
 	  
 {
 	connection::accept(*this, acceptor_);
@@ -182,7 +179,9 @@ void local_node::register_connection(connection::ptr_t con)
 
 		reported_addresses_.insert(con->reported_node_address());
 		recompute_identity();
+
 		connecting_peers_.erase(std::find(connecting_peers_.begin(), connecting_peers_.end(), con));
+
 		if (con->accepts_ib_traffic()) {
 			DLOG(INFO) << "New in-band Connection established";
 			ib_peers_.push_back(con);
@@ -197,34 +196,20 @@ void local_node::register_connection(connection::ptr_t con)
 
 				if (old_successor != ib_peers_.end()) {
 					DLOG(INFO) << "Old Successor found (" << std::string((*old_successor)->remote_id()) << "), notifying";
-					// we did, let him know about this new peer, he is likely to be of interest to him as a reverse successor
+					// we did, let him know about this new peer, this new peer is likely to be of interest to him as a reverse successor
 					(*old_successor)->send_reverse_successor();
 				}
+			}
+
+			// update the closer peers count for cache policy tracking
+			for (std::list<stored_hunk>::iterator hunk = stored_hunks_.begin(); hunk != stored_hunks_.end(); ++hunk) {
+				if (!hunk->local_requested && ::distance(hunk->id, con->remote_id()) < ::distance(hunk->id, id()))
+					hunk->closer_peers++;
 			}
 		}
 		else {
 			oob_peers_.push_back(oob_peer::create(*this, con));
 		}
-
-	//	con->receive_packet(packet::ptr_t(new packet()), boost::protect(boost::bind(&local_node::incoming_packet, this, con, _1, _2)));
-
-#if 0
-		if (sucessor.address() == ip::address_v4() || sucessor.address() == ip::address_v6())
-			sucessor = con->remote_endpoint();
-/*
-		if ((con->oob_threshold() && con->remote_endpoint() != sucessor) || (!connection_count() && con->remote_endpoint() == sucessor)) {
-			connection::connect(*this, sucessor, true);
-			for (std::vector<ip::tcp::endpoint>::iterator peer = finger_queue_.begin(); peer != finger_queue_.end(); ++peer)
-				connection::connect(*this, *peer, true);
-		}
-		else if (!connection_count()) {
-			finger_queue_.push_back(con->remote_endpoint());
-			connection::connect(*this, sucessor, false);
-		}*/
-		if (con->remote_endpoint() != sucessor || !connection_count()) {
-			make_connection(sucessor);
-		}
-#endif
 	}
 	else if (connection_count() == 0)
 		bootstrap();
@@ -658,20 +643,6 @@ void local_node::make_connection(ip::tcp::endpoint peer)
 	connection::connect(*this, peer, connection::ib);
 }
 
-#ifdef SIMULATION
-void local_node::heal()
-{
-	std::vector<connection::ptr_t>::iterator sucessor_peer = get_sucessor<reverse_distance>(id()-1, id()+1, id());
-
-	if (sucessor_peer != ib_peers_.end()) {
-		heal_timer_.expires_from_now(boost::posix_time::milliseconds(10));
-		heal_timer_.async_wait(boost::bind(&local_node::make_connection, boost::ref(*this), sucessor_peer->get()->remote_endpoint()));
-		(*sucessor_peer)->disconnect();
-		ib_peers_.erase(sucessor_peer);
-	}
-}
-#endif
-
 boost::posix_time::time_duration local_node::base_hunk_lifetime()
 {
 	using namespace boost::accumulators;
@@ -690,6 +661,13 @@ void local_node::send_failure(connection::ptr_t con)
 	if (con->is_connected()) {
 		std::vector<connection::ptr_t>::iterator peer = std::find(ib_peers_.begin(), ib_peers_.end(), con);
 		if (peer != ib_peers_.end()) {
+
+			// update the closer peers count for cache policy tracking
+			for (std::list<stored_hunk>::iterator hunk = stored_hunks_.begin(); hunk != stored_hunks_.end(); ++hunk) {
+				if (!hunk->local_requested && ::distance(hunk->id, con->remote_id()) < ::distance(hunk->id, id()))
+					hunk->closer_peers--;
+			}
+
 			ib_peers_.erase(peer);
 			disconnecting_peers_.push_back(con);
 		}
@@ -700,8 +678,10 @@ void local_node::disconnect_peer(connection::ptr_t con)
 {
 	if (con->is_connected()) {
 		std::vector<connection::ptr_t>::iterator peer = std::find(ib_peers_.begin(), ib_peers_.end(), con);
+
 		if (peer != ib_peers_.end()) {
 			DLOG(INFO) << std::string(id()) << " Disconnecting in-band peer: " << std::string(con->remote_id());
+
 			if (get_strict_sucessor<reverse_distance>(id() - 1, id() + 1, id()) == peer) {
 				// we just lost our reverse successor, ask the new guy if he has a new one for us
 				DLOG(INFO) << "Lost RS";
@@ -711,6 +691,12 @@ void local_node::disconnect_peer(connection::ptr_t con)
 					DLOG(INFO) << "Requesting new reverse successor from " << std::string((*new_rs)->remote_id());
 					(*new_rs)->request_reverse_successor();
 				}
+			}
+
+			// update the closer peers count for cache policy tracking
+			for (std::list<stored_hunk>::iterator hunk = stored_hunks_.begin(); hunk != stored_hunks_.end(); ++hunk) {
+				if (!hunk->local_requested && ::distance(hunk->id, con->remote_id()) < ::distance(hunk->id, id()))
+					hunk->closer_peers--;
 			}
 
 			ib_peers_.erase(peer);
@@ -747,4 +733,119 @@ void local_node::update_threshold_stats()
 	}
 
 	avg_oob_threshold_ = sum / ib_peers_.size();
+}
+
+struct hunk_desc_cmp
+{
+	hunk_desc_cmp() : now(boost::posix_time::second_clock::universal_time()) {}
+
+	bool operator()(const stored_hunk& l, const stored_hunk& r) const
+	{
+		return staleness(now - l.last_access, l.closer_peers) > staleness(now - r.last_access, r.closer_peers);
+	}
+
+	bool operator()(const stored_hunk& l, double r) const
+	{
+		return staleness(now - l.last_access, l.closer_peers) > r;
+	}
+
+	double staleness(boost::posix_time::time_duration age, int closer_peers) const
+	{
+		return age.total_seconds() * std::exp(double(closer_peers));
+	}
+
+	const boost::posix_time::ptime now;
+};
+
+hunk_descriptor_t local_node::cache_local_request(protocol_t pid, network_key id, std::size_t size)
+{
+	stored_hunks_t::iterator hunk = stored_hunks_.begin();
+	for (; hunk != stored_hunks_.end(); ++hunk) {
+		if (hunk->protocol == pid && hunk->id == id) {
+			hunk->local_requested = true;
+			hunk->closer_peers = 0;
+			return stored_hunks_.end();
+		}
+	}
+
+	try_prune_cache(size, 0, boost::posix_time::time_duration(0, 0, 0, 0));
+	stored_hunks_.push_back(stored_hunk(pid, id, size, 0, true));
+	return --stored_hunks_.end();
+}
+
+hunk_descriptor_t local_node::cache_remote_request(protocol_t pid, network_key id, std::size_t size, boost::posix_time::time_duration request_delta)
+{
+	// hunk is larger than our average oob threshold, we will never cache such a hunk
+	// for remote requests, shouldn't be needed since we should not be seeing attached data
+	// that exceeds our threshold
+	//if (size > average_oob_threshold())
+	//	return stored_hunks_.end();
+
+	int closer = closer_peers(id);
+
+	if (!try_prune_cache(size, closer, request_delta))
+		return stored_hunks_.end();
+
+	stored_hunks_.push_back(stored_hunk(pid, id, size, closer, false));
+	return --stored_hunks_.end();
+}
+
+hunk_descriptor_t local_node::cache_store(protocol_t pid, network_key id, std::size_t size)
+{
+	int closer = closer_peers(id);
+
+	if (closer < 2) {
+		try_prune_cache(size, closer, boost::posix_time::time_duration(0, 0, 0, 0));
+		stored_hunks_.push_back(stored_hunk(pid, id, size, closer, false));
+		return --stored_hunks_.end();
+	}
+
+	return stored_hunks_.end();
+}
+
+bool local_node::try_prune_cache(std::size_t size, int closer_peers, boost::posix_time::time_duration age)
+{
+	// only bother looking for hunks to prune if we don't already have enough free space
+	if (stored_size_ + size > config_.target_store_size()) {
+		hunk_desc_cmp compare;
+		boost::uint64_t needed_bytes_ = size - (config_.target_store_size() - stored_size_);
+		double new_hunk_staleness = compare.staleness(age, closer_peers);
+		std::vector<stored_hunks_t::iterator> to_be_pruned;
+
+		// first we need to sort the list in decending order according to "staleness"
+		stored_hunks_.sort(compare);
+
+		// start at the begining of the list and work through it until eiher:
+		// 1. The current hunk has a lower staleness than the candidate
+		// 2. Pruning all hunks up to the current will free up enough space for the candidate
+		for (stored_hunks_t::iterator hunk = stored_hunks_.begin(); hunk != stored_hunks_.end() && compare(*hunk, new_hunk_staleness); ++hunk) {
+			// skip any hunks which have been stored for less than one hour multiplied by e^(-closer_peers)
+			// this is a minimum requirement to maintain network integrity
+			if ((compare.now - hunk->stored).total_seconds() < boost::posix_time::hours(1).total_seconds() * std::exp(double(-closer_peers)))
+				continue;
+
+			to_be_pruned.push_back(hunk);
+			if (needed_bytes_ <= hunk->size) {
+				// That's it, we've got enough bytes, now prune the hunks to free the space
+				for (std::vector<stored_hunks_t::iterator>::iterator pruned = to_be_pruned.begin(); pruned != to_be_pruned.end(); ++pruned) {
+					get_protocol((*pruned)->protocol).prune_hunk((*pruned)->id);
+					stored_hunks_.erase(*pruned);
+				}
+
+				return true;
+			}
+			needed_bytes_ -= hunk->size;
+		}
+
+		// if we get here it means we failed to free up enough space :(
+		return false;
+	}
+
+	return true;
+}
+
+hunk_descriptor_t local_node::load_existing_hunk(protocol_t pid, network_key id, std::size_t size)
+{
+	stored_hunks_.push_back(stored_hunk(pid, id, size, closer_peers(id), false));
+	return --stored_hunks_.end();
 }

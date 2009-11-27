@@ -31,18 +31,20 @@
 //
 // Contact:  Steven Siloti <ssiloti@gmail.com>
 
+#include "node.hpp"
 #include "hunk.hpp"
 #include "config.hpp"
-#include <boost/filesystem.hpp>
+#include <boost/date_time/posix_time/posix_time_types.hpp>
+#include <boost/date_time/posix_time/conversion.hpp>
 #include <boost/config.hpp>
 #include <cstdio>
 
 #ifdef BOOST_WINDOWS
 // NTFS has an access time resolution of one hour (ugh)
-static const content_store::file_time_t flush_threashold = 36000000000L;
+static const boost::posix_time::time_duration flush_threashold = boost::posix_time::hours(1);
 #else
 // flush file metadata at most every 10 minutes on POSIX systems
-static const content_store::file_time_t flush_threashold = 600;
+static const boost::posix_time::time_duration flush_threashold = boost::posic_time::minutes(10);
 #include <sys/stat.h>
 #include <utime.h>
 #include <unistd.h>
@@ -67,43 +69,38 @@ std::string content_store::mapped_content::temp_path(const std::string& path, st
 	return p.string();
 }
 
-static void load_contents(std::map<network_key, content_store::stored_content>& store, path dir_path)
+void content_store::load_contents(path dir_path, protocol_t pid, local_node& node)
 {
 	if (!exists(dir_path)) return;
 	directory_iterator end;
 	for (directory_iterator it( dir_path ); it != end; ++it) {
 		if (is_directory(it->status()))
-			load_contents(store, it->path());
+			load_contents(it->path(), pid, node);
 		else {
 			network_key key(it->filename());
 			DLOG(INFO) << "loading content " << it->path().string().c_str();
-			content_store::stored_content new_content;
 #ifdef BOOST_WINDOWS
 			HANDLE file_hnd = ::CreateFileA(it->path().string().c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 			FILETIME stored, accessed;
+			hunk_descriptor_t hunk_desc = node.load_existing_hunk(pid, key, ::GetFileSize(file_hnd, NULL));
 			::GetFileTime(file_hnd, &stored, &accessed, NULL);
-			LARGE_INTEGER temp;
-			temp.LowPart = stored.dwLowDateTime;
-			temp.HighPart = stored.dwHighDateTime;
-			new_content.stored = temp.QuadPart;
-			temp.LowPart = accessed.dwLowDateTime;
-			temp.HighPart = accessed.dwHighDateTime;
-			new_content.last_access = temp.QuadPart;
-			new_content.size = ::GetFileSize(file_hnd, NULL);
+			hunk_desc->stored = boost::posix_time::from_ftime<boost::posix_time::ptime>(stored);
+			hunk_desc->last_access = boost::posix_time::from_ftime<boost::posix_time::ptime>(accessed);
 			::CloseHandle(file_hnd);
 #else
+			// TODO: POSIX version
 #endif
-			store.insert(std::make_pair(key, new_content));
+			stored_contents_.insert(std::make_pair(key, stored_content(hunk_desc)));
 		}
 	}
 
 }
 
-content_store::content_store(const std::string& path)
+content_store::content_store(const std::string& path, protocol_t pid, local_node& node)
 	: path_(path)
 {
 	boost::filesystem::create_directories(boost::filesystem::path(path));
-	load_contents(stored_contents_, path_);
+	load_contents(path_, pid, node);
 }
 
 content_store::~content_store()
@@ -113,14 +110,15 @@ content_store::~content_store()
 
 void content_store::flush()
 {
-	file_time_t current_time = now();
+	boost::posix_time::ptime now = boost::posix_time::second_clock::universal_time();
 	for (const_iterator content = begin(); content != end(); ++content)
-		if (current_time - content->second.last_access > flush_threashold) {
+		if (now - content->second.desc->last_access > flush_threashold) {
 			std::string path = content_path(content->first);
 #ifdef BOOST_WINDOWS
 			HANDLE file_hnd = ::CreateFileA(path.c_str(), FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 			LARGE_INTEGER access_i;
-			access_i.QuadPart = content->second.last_access;
+			access_i.QuadPart = (content->second.desc->last_access - boost::posix_time::ptime(boost::gregorian::date(1601, boost::gregorian::Jan, 01))).total_microseconds();
+			access_i.QuadPart *= 10;
 			FILETIME last_access;
 			last_access.dwLowDateTime = access_i.LowPart;
 			last_access.dwHighDateTime = access_i.HighPart;
@@ -135,20 +133,6 @@ void content_store::flush()
 		}
 }
 
-content_store::file_time_t content_store::now()
-{
-#ifdef BOOST_WINDOWS
-	FILETIME sys_time;
-	::GetSystemTimeAsFileTime(&sys_time);
-	LARGE_INTEGER i;
-	i.LowPart = sys_time.dwLowDateTime;
-	i.HighPart = sys_time.dwHighDateTime;
-	return i.QuadPart;
-#else
-	return ::time(NULL);
-#endif
-}
-
 content_store::mapped_content_ptr content_store::get_temp(std::size_t size)
 {
 	return mapped_content_ptr(new mapped_content(path_, size, true));
@@ -160,6 +144,8 @@ content_store::const_mapped_content_ptr content_store::get(const network_key& ke
 
 	if (stored_contents == stored_contents_.end())
 		return const_mapped_content_ptr();
+
+	stored_contents->second.desc->last_access = boost::posix_time::second_clock::universal_time();
 
 	const_mapped_content_ptr content = stored_contents->second.content.lock();
 	
@@ -177,29 +163,27 @@ content_store::const_mapped_content_ptr content_store::get(const network_key& ke
 		stat(path.c_str(), &content_stat);
 		content_size = content_stat.st_size;
 #endif */
-		content.reset(new mapped_content(path, stored_contents->second.size));
+		content.reset(new mapped_content(path, stored_contents->second.desc->size));
 		stored_contents->second.content = content;
 		return content;
 	}
 }
 
-content_store::const_mapped_content_ptr content_store::put(const network_key& key, const_buffer content)
+content_store::const_mapped_content_ptr content_store::put(hunk_descriptor_t desc, const_buffer content)
 {
-	iterator stored_contents = stored_contents_.find(key);
+	iterator stored_contents = stored_contents_.find(desc->id);
 
 	if (stored_contents != stored_contents_.end()) {
 		unlink_storage(stored_contents);
 	}
 	else {
-		stored_content new_content;
-		stored_contents = stored_contents_.insert(std::make_pair(key, stored_content())).first;
+	//	stored_content new_content;
+		stored_contents = stored_contents_.insert(std::make_pair(desc->id, stored_content(desc))).first;
 	}
 
-	stored_contents->second.last_access = now();
-	stored_contents->second.stored = stored_contents->second.last_access;
-	stored_contents->second.size = buffer_size(content);
+	stored_contents->second.desc = desc;
 
-	std::string path = content_path(key, true);
+	std::string path = content_path(desc->id, true);
 
 	{
 #ifdef BOOST_WINDOWS
@@ -220,9 +204,9 @@ content_store::const_mapped_content_ptr content_store::put(const network_key& ke
 	return new_mapping;
 }
 
-content_store::const_mapped_content_ptr content_store::put(const network_key& key, content_store::mapped_content_ptr content)
+content_store::const_mapped_content_ptr content_store::put(hunk_descriptor_t desc, content_store::mapped_content_ptr content)
 {
-	iterator stored_contents = stored_contents_.find(key);
+	iterator stored_contents = stored_contents_.find(desc->id);
 
 	if (stored_contents != stored_contents_.end()) {
 		// On POSIX we should be using the rename to overwrite the existing file
@@ -231,13 +215,12 @@ content_store::const_mapped_content_ptr content_store::put(const network_key& ke
 		unlink_storage(stored_contents);
 	}
 	else {
-		stored_content new_content;
-		stored_contents = stored_contents_.insert(std::make_pair(key, stored_content())).first;
+	//	stored_content new_content;
+		stored_contents = stored_contents_.insert(std::make_pair(desc->id, stored_content(desc))).first;
 	}
 
-	stored_contents->second.last_access = now();
-	stored_contents->second.stored = stored_contents->second.last_access;
-	stored_contents->second.size = content->region.get_size();
+	stored_contents->second.desc = desc;
+
 	content->deleted = false;
 
 	std::stringstream temp_path;
@@ -247,11 +230,11 @@ content_store::const_mapped_content_ptr content_store::put(const network_key& ke
 	// content *should* be unique at this point, should probably add a check for this...
 	content.reset();
 	
-	std::string path = content_path(key, true);
+	std::string path = content_path(desc->id, true);
 
 	std::rename(temp_path.str().c_str(), path.c_str());
 
-	const_mapped_content_ptr new_mapping(new mapped_content(path, stored_contents->second.size));
+	const_mapped_content_ptr new_mapping(new mapped_content(path, stored_contents->second.desc->size));
 	stored_contents->second.content = new_mapping;
 	return new_mapping;
 }

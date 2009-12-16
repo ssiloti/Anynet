@@ -113,6 +113,7 @@ public:
 	boost::posix_time::time_duration base_hunk_lifetime();
 	boost::posix_time::time_duration age() const { return boost::posix_time::second_clock::universal_time() - created_; }
 	std::size_t average_oob_threshold() const { return avg_oob_threshold_; }
+	std::vector<protocol_t> supported_protocols() const;
 
 	// connections
 	void make_connection(ip::tcp::endpoint peer);
@@ -175,6 +176,10 @@ private:
 	void snoop(packet::ptr_t pkt);
 	void disconnect_peer(connection::ptr_t con);
 	void update_threshold_stats();
+
+	bool is_user_content(protocol_t p)    const { return p < 32; }
+	bool is_network_control(protocol_t p) const { return p >= 48; }
+	network_protocol::ptr_t validate_protocol(protocol_t protocol);
 
 	bool try_prune_cache(std::size_t size, int closer_peers, boost::posix_time::time_duration age);
 

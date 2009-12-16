@@ -40,11 +40,20 @@
 
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/placeholders.hpp>
-#include <boost/array.hpp>
+#include <boost/asio/buffer.hpp>
 #include <boost/cstdint.hpp>
+#include <vector>
 
 namespace ip = boost::asio::ip;
 namespace placeholders = boost::asio::placeholders;
+
+using boost::asio::const_buffer;
+using boost::asio::mutable_buffer;
+using boost::asio::const_buffers_1;
+using boost::asio::mutable_buffers_1;
+using boost::asio::buffer_cast;
+using boost::asio::buffer_size;
+using boost::asio::buffer;
 
 template <typename Addr>
 inline Addr to(ip::address a)
@@ -64,30 +73,89 @@ inline ip::address_v6 to<ip::address_v6>(ip::address a)
 	return a.to_v6();
 }
 
-struct net_link
+class net_link
 {
-	static const int sr_buffer_size = 8192;
+public:
+	static const std::size_t sr_buffer_size = 8192;
 	static const int protocol_version = 0;
 
-	typedef boost::array<boost::uint8_t, sr_buffer_size> sr_buffer_t;
+	typedef std::vector<boost::uint8_t> sr_buffer_t;
 
-	net_link(boost::asio::io_service& io_service) : socket(io_service), valid_recv_bytes(0) {}
+	net_link(boost::asio::io_service& io_service) : socket(io_service), valid_receive_bytes_(0), valid_send_bytes_(0), send_buffer_(sr_buffer_size) {}
+
+	mutable_buffer receive_buffer(std::size_t size = 0)
+	{
+#if 0
+		std::size_t old_size = receive_buffer_.size();
+		std::size_t add_size = std::max(size, sr_buffer_size);
+		receive_buffer_.resize(old_size + add_size);
+		return mutable_buffer(&receive_buffer_[old_size], add_size);
+#else
+		if (receive_buffer_.size() < valid_receive_bytes_ + std::max(size, sr_buffer_size))
+			receive_buffer_.resize(valid_receive_bytes_ + std::max(size, sr_buffer_size));
+		return mutable_buffer(&receive_buffer_[valid_receive_bytes_], std::max(size, sr_buffer_size));
+#endif
+	}
+
+	const_buffer received_buffer()
+	{
+		return const_buffer(&receive_buffer_[0], valid_receive_bytes_);
+	}
+
+	std::size_t valid_received_bytes()
+	{
+		return valid_receive_bytes_;
+	}
 
 	void consume_receive_buffer(std::size_t bytes)
 	{
-		assert(bytes <= valid_recv_bytes);
+		valid_receive_bytes_ -= bytes;
+#if 0
+		receive_buffer_.erase(receive_buffer_.begin(), receive_buffer_.begin() + bytes);
+#else
+		std::memmove(&receive_buffer_[0], &receive_buffer_[bytes], valid_receive_bytes_);
+#endif
+	}
 
-		valid_recv_bytes -= bytes;
+	void received(std::size_t bytes)
+	{
+#if 0
+		receive_buffer_.resize(valid_receive_bytes_ += bytes);
+#else
+		valid_receive_bytes_ += bytes;
+#endif
+	}
 
-		if (valid_recv_bytes)
-			std::memmove(receive_buffer.data(), receive_buffer.data() + bytes, valid_recv_bytes);
+	mutable_buffer send_buffer(std::size_t size = sr_buffer_size)
+	{
+#if 0
+		std::size_t old_size = send_buffer_.size();
+		send_buffer_.resize(old_size + size);
+		return mutable_buffer(&send_buffer_[old_size], size);
+#else
+		std::size_t old_size = valid_send_bytes_;
+		valid_send_bytes_ += size;
+		return mutable_buffer(&send_buffer_[old_size], size);
+#endif
+	}
+
+	const_buffer sendable_buffer()
+	{
+		return mutable_buffer(&send_buffer_[0], valid_send_bytes_);
+	}
+
+	void clear_send_buffer()
+	{
+		valid_send_bytes_ = 0;
 	}
 
 	ip::tcp::socket socket;
-	sr_buffer_t receive_buffer;
-	sr_buffer_t send_buffer;
 
-	size_t valid_recv_bytes;
+private:
+	std::size_t valid_receive_bytes_;
+	std::size_t valid_send_bytes_;
+	sr_buffer_t receive_buffer_;
+	sr_buffer_t send_buffer_;
 };
 
 #endif

@@ -55,6 +55,8 @@ struct link_handshake
 	boost::uint8_t rsvd[2];
 	boost::uint8_t incoming_port[2];
 	boost::uint8_t remote_id[network_key::packed_size];
+	boost::uint8_t supported_protocol_count;
+	boost::uint8_t supported_protocols[1];
 };
 
 struct oob_threshold_frame
@@ -152,9 +154,17 @@ void connection::write_handshake(const boost::system::error_code& error)
 void connection::read_handshake(const boost::system::error_code& error, std::size_t bytes_transferred)
 {
 	if (!error && lifecycle_ == connecting) {
+		std::size_t handshake_min_size;
+
+		if (link_.socket.remote_endpoint().address().is_v4())
+			handshake_min_size = sizeof(link_handshake<ip::address_v4>);
+		else
+			handshake_min_size = sizeof(link_handshake<ip::address_v6>);
+
 		boost::asio::async_read(link_.socket,
-		                        mutable_buffers_1(link_.receive_buffer.data(), bytes_transferred),
-		                        boost::bind(&connection::complete_connection,
+		                        mutable_buffers_1(link_.receive_buffer()),
+								boost::asio::transfer_at_least(handshake_min_size),
+		                        boost::bind(&connection::handshake_received,
 		                                    shared_from_this(),
 		                                    placeholders::error,
 		                                    placeholders::bytes_transferred));
@@ -170,7 +180,9 @@ void connection::read_handshake(const boost::system::error_code& error, std::siz
 template <typename Adr>
 const_buffer connection::do_generate_handshake()
 {
-	link_handshake<Adr>* handshake = reinterpret_cast<link_handshake<Adr>*>(link_.send_buffer.data());
+	const std::vector<protocol_t>& protocols = node_.supported_protocols();
+	link_handshake<Adr>* handshake = buffer_cast<link_handshake<Adr>*>( link_.send_buffer(sizeof(link_handshake<Adr>)
+	                                                                    + protocols.size() - 1) );
 	handshake->sig[0] = 'A';
 	handshake->sig[1] = 'N';
 	handshake->protocol = link_.protocol_version;
@@ -181,7 +193,10 @@ const_buffer connection::do_generate_handshake()
 
 	u16(handshake->incoming_port, node_.config().listen_port());
 
-	return const_buffer(link_.send_buffer.data(), sizeof(link_handshake<Adr>));
+	handshake->supported_protocol_count = protocols.size();
+	std::copy(protocols.begin(), protocols.end(), handshake->supported_protocols);
+
+	return link_.sendable_buffer();
 }
 
 const_buffer connection::generate_handshake()
@@ -195,13 +210,13 @@ const_buffer connection::generate_handshake()
 }
 
 template <typename Adr>
-bool connection::do_parse_handshake()
+unsigned connection::do_parse_handshake()
 {
 //	DLOG(INFO) << "Parsing handshake";
-	link_handshake<Adr>* handshake = reinterpret_cast<link_handshake<Adr>*>(link_.receive_buffer.data());
+	const link_handshake<Adr>* handshake = buffer_cast<const link_handshake<Adr>*>(link_.received_buffer());
 
 	if (handshake->sig[0] != 'A' || handshake->sig[1] != 'N' || handshake->protocol != link_.protocol_version)
-		return false;
+		return 0;
 
 	routing_type_ = std::min(routing_type_, connection::routing_type(handshake->type & 0x03));
 	incoming_port_ = u16(handshake->incoming_port);
@@ -210,10 +225,12 @@ bool connection::do_parse_handshake()
 	std::memcpy(ip_bytes.data(), handshake->remote_ip, ip_bytes.size());
 	reported_peer_address_ = Adr(ip_bytes);
 
-	return true;
+	supported_protocols_.resize(handshake->supported_protocol_count);
+	link_.consume_receive_buffer(sizeof(link_handshake<Adr>) - 1);
+	return handshake->supported_protocol_count;
 }
 
-void connection::complete_connection(const boost::system::error_code& error, std::size_t bytes_transferred)
+void connection::handshake_received(const boost::system::error_code& error, std::size_t bytes_transferred)
 {
 	if (error || lifecycle_ != connecting) {
 		if (lifecycle_ != cleanup) {
@@ -222,15 +239,17 @@ void connection::complete_connection(const boost::system::error_code& error, std
 		}
 		return;
 	}
-	
-	bool success;
+
+	link_.received(bytes_transferred);
+
+	unsigned supported_protocols;
 
 	if (link_.socket.remote_endpoint().address().is_v4())
-		success = do_parse_handshake<ip::address_v4>();
+		supported_protocols = do_parse_handshake<ip::address_v4>();
 	else
-		success = do_parse_handshake<ip::address_v6>();
+		supported_protocols = do_parse_handshake<ip::address_v6>();
 
-	if (!success) {
+	if (!supported_protocols) {
 		link_.socket.close();
 		DLOG(INFO) << "Error parsing handshake";
 		return;
@@ -244,6 +263,34 @@ void connection::complete_connection(const boost::system::error_code& error, std
 	remote_identity_ = network_key(link_.socket.remote_endpoint().address());
 #endif
 
+	if (supported_protocols > link_.valid_received_bytes())
+		boost::asio::async_read(link_.socket,
+		                        mutable_buffers_1(link_.receive_buffer()),
+								boost::asio::transfer_at_least(supported_protocols - link_.valid_received_bytes()),
+		                        boost::bind(&connection::complete_connection,
+		                                    shared_from_this(),
+		                                    placeholders::error,
+		                                    placeholders::bytes_transferred));
+	else
+		complete_connection(error, 0);
+}
+
+void connection::complete_connection(const boost::system::error_code& error, std::size_t bytes_transferred)
+{
+	if (error || lifecycle_ != connecting) {
+		if (lifecycle_ != cleanup) {
+			disconnect();
+			stillborn();
+		}
+		return;
+	}
+
+	link_.received(bytes_transferred);
+
+	const boost::uint8_t* supported_protocols = buffer_cast<const boost::uint8_t*>(link_.received_buffer());
+	std::copy(supported_protocols, supported_protocols + supported_protocols_.size(), supported_protocols_.begin());
+	link_.consume_receive_buffer(supported_protocols_.size());
+
 	lifecycle_ = connected;
 	established_ = boost::posix_time::second_clock::universal_time();
 	node_.register_connection(shared_from_this());
@@ -254,16 +301,9 @@ void connection::complete_connection(const boost::system::error_code& error, std
 	send_next_frame();
 }
 
-void connection::send(const packet::ptr_t pkt)
+void connection::send(packet::ptr_t pkt)
 {
-	// content is attached but it's too big for this peer's oob threshold, detach it and list ourselves as a source
-	if (pkt->content_status() == packet::content_attached && buffer_size(pkt->payload()->get()) > oob_threshold() && pkt->destination() != remote_id()) {
-		content_sources::ptr_t self_source(new content_sources(buffer_size(pkt->payload()->get())));
-		self_source->sources.insert(std::make_pair(node_.public_endpoint(), content_sources::source()));
-		pkt->detach_content(self_source);
-	}
-
-	send_queue_.push_back(queued_packet::message(pkt));
+	send_queue_.push_back(boost::static_pointer_cast<content_frame>(pkt));
 
 	if (!outstanding_non_packet_frames_ && send_queue_.size() == 1 && lifecycle_ == connected) {
 		send_next_frame();
@@ -272,9 +312,9 @@ void connection::send(const packet::ptr_t pkt)
 		DLOG(INFO) << "Queued packet from " << std::string(node_.id()) << " to " << std::string(remote_id());
 }
 
-void connection::send(const frame_fragment::ptr_t frag)
+void connection::send(frame_fragment::ptr_t frag)
 {
-	send_queue_.push_back(queued_packet::message(frag));
+	send_queue_.push_back(boost::static_pointer_cast<content_frame>(frag));
 
 	if (!outstanding_non_packet_frames_ && send_queue_.size() == 1 && lifecycle_ == connected)
 		send_next_frame();
@@ -304,16 +344,14 @@ void connection::content_sent(const boost::system::error_code& error, std::size_
 
 void connection::receive_next_frame()
 {
-	update_oob_threshold();
-
-	if (link_.valid_recv_bytes) {
+	if (link_.valid_received_bytes()) {
 		transfer_outstanding_ = true;
 		frame_head_received(boost::system::error_code(), 0);
 	}
 	else {
 		transfer_outstanding_ = false;
 		boost::asio::async_read(link_.socket,
-		                        mutable_buffers_1(buffer(link_.receive_buffer)),
+		                        mutable_buffers_1(link_.receive_buffer()),
 		                        boost::asio::transfer_at_least(4),
 		                        boost::bind(&connection::frame_head_received,
 		                                    shared_from_this(),
@@ -330,13 +368,13 @@ void connection::frame_head_received(const boost::system::error_code& error, std
 		return;
 	}
 
-	link_.valid_recv_bytes += bytes_transfered;
+	link_.received(bytes_transfered);
 
 //	DLOG(INFO) << "Recieved " << bytes_transfered << " bytes, total buffered: " << link_.valid_recv_bytes;
 
-	while (link_.valid_recv_bytes)
+	while (link_.valid_received_bytes())
 	{
-		switch (link_.receive_buffer[0])
+		switch (buffer_cast<const boost::uint8_t*>(link_.received_buffer())[0])
 		{
 		case frame_network_packet:
 			{
@@ -346,14 +384,14 @@ void connection::frame_head_received(const boost::system::error_code& error, std
 				return;
 			}
 		case frame_oob_threshold_update:
-			if (link_.valid_recv_bytes >= oob_threshold_size()) {
+			if (link_.valid_received_bytes() >= oob_threshold_size()) {
 				parse_oob_threshold();
 				break;
 			}
 
 			boost::asio::async_read(link_.socket,
-			                        mutable_buffers_1(buffer(link_.receive_buffer) + link_.valid_recv_bytes),
-			                        boost::asio::transfer_at_least(oob_threshold_size()),
+			                        mutable_buffers_1(link_.receive_buffer()),
+			                        boost::asio::transfer_at_least(oob_threshold_size() - link_.valid_received_bytes()),
 			                        boost::bind(&connection::frame_head_received,
 			                                    shared_from_this(),
 			                                    placeholders::error,
@@ -362,7 +400,7 @@ void connection::frame_head_received(const boost::system::error_code& error, std
 
 		case frame_successor_request:
 			{
-				if (link_.valid_recv_bytes >= 4) {
+				if (link_.valid_received_bytes() >= 4) {
 					int previously_outstanding = outstanding_non_packet_frames_;
 					outstanding_non_packet_frames_ |= frame_bit_successor;
 					if (!(previously_outstanding || send_queue_.size()))
@@ -374,8 +412,8 @@ void connection::frame_head_received(const boost::system::error_code& error, std
 				}
 
 				boost::asio::async_read(link_.socket,
-				                        mutable_buffers_1(buffer(link_.receive_buffer) + link_.valid_recv_bytes),
-				                        boost::asio::transfer_at_least(4 - link_.valid_recv_bytes),
+				                        mutable_buffers_1(link_.receive_buffer()),
+				                        boost::asio::transfer_at_least(4 - link_.valid_received_bytes()),
 				                        boost::bind(&connection::frame_head_received,
 				                                    shared_from_this(),
 				                                    placeholders::error,
@@ -385,14 +423,14 @@ void connection::frame_head_received(const boost::system::error_code& error, std
 			}
 
 		case frame_successor:
-			if (link_.valid_recv_bytes >= successor_size()) {
+			if (link_.valid_received_bytes() >= successor_size()) {
 				parse_successor();
 				break;
 			}
 
 			boost::asio::async_read(link_.socket,
-			                        mutable_buffers_1(buffer(link_.receive_buffer) + link_.valid_recv_bytes),
-			                        boost::asio::transfer_at_least(oob_threshold_size()),
+			                        mutable_buffers_1(link_.receive_buffer()),
+			                        boost::asio::transfer_at_least(oob_threshold_size() - link_.valid_received_bytes()),
 			                        boost::bind(&connection::frame_head_received,
 			                                    shared_from_this(),
 			                                    placeholders::error,
@@ -408,7 +446,7 @@ void connection::frame_head_received(const boost::system::error_code& error, std
 
 		default:
 			{
-				DLOG(INFO) << "Unknown frame type: " << link_.receive_buffer[0];
+				DLOG(INFO) << "Unknown frame type: " << buffer_cast<const boost::uint8_t*>(link_.received_buffer())[0];
 				google::FlushLogFiles(google::INFO);
 				node_.receive_failure(shared_from_this());
 				return;
@@ -421,16 +459,20 @@ void connection::frame_head_received(const boost::system::error_code& error, std
 
 void connection::incoming_packet(packet::ptr_t pkt, std::size_t payload_size)
 {
-	if (!payload_size)
-		receive_next_frame();
 	node_.incoming_packet(shared_from_this(), pkt, payload_size);
+	if (!payload_size) {
+		update_oob_threshold();
+		receive_next_frame();
+	}
 }
 
 void connection::incoming_fragment(frame_fragment::ptr_t frag, std::size_t payload_size)
 {
-	if (!payload_size)
-		receive_next_frame();
 	node_.incoming_fragment(shared_from_this(), frag, payload_size);
+	if (!payload_size) {
+		update_oob_threshold();
+		receive_next_frame();
+	}
 }
 
 std::size_t connection::oob_threshold_size()
@@ -450,7 +492,7 @@ void connection::parse_oob_threshold()
 		ack_queue_.pop_front();
 	}
 
-	oob_threshold_frame* frame = reinterpret_cast<oob_threshold_frame*>(link_.receive_buffer.data());
+	const oob_threshold_frame* frame = buffer_cast<const oob_threshold_frame*>(link_.received_buffer());
 	remote_oob_threshold_ = u32(frame->oob_threshold);
 
 	link_.consume_receive_buffer(sizeof(oob_threshold_frame));
@@ -465,9 +507,9 @@ std::size_t connection::successor_size()
 }
 
 template <typename Addr>
-std::size_t do_parse_successor(boost::uint8_t* buf, ip::tcp::endpoint& ep)
+std::size_t do_parse_successor(const_buffer buf, ip::tcp::endpoint& ep)
 {
-	successor_frame<Addr>* frame = reinterpret_cast<successor_frame<Addr>*>(buf);
+	const successor_frame<Addr>* frame = buffer_cast<const successor_frame<Addr>*>(buf);
 
 	typename Addr::bytes_type ip_bytes;
 	std::memcpy(ip_bytes.data(), frame->sucessor_ip, ip_bytes.size());
@@ -483,9 +525,9 @@ void connection::parse_successor()
 
 	std::size_t consumed;
 	if (link_.socket.remote_endpoint().address().is_v4())
-		consumed = do_parse_successor<ip::address_v4>(link_.receive_buffer.data(), successor);
+		consumed = do_parse_successor<ip::address_v4>(link_.received_buffer(), successor);
 	else
-		consumed = do_parse_successor<ip::address_v6>(link_.receive_buffer.data(), successor);
+		consumed = do_parse_successor<ip::address_v6>(link_.received_buffer(), successor);
 
 	link_.consume_receive_buffer(consumed);
 
@@ -501,7 +543,7 @@ void connection::parse_successor()
 template <typename Addr>
 std::size_t do_generate_successor_frame(net_link& link, const Addr& sucessor_address, boost::uint16_t sucessor_port)
 {
-	successor_frame<Addr>* frame = reinterpret_cast<successor_frame<Addr>*>(link.send_buffer.data());
+	successor_frame<Addr>* frame = buffer_cast<successor_frame<Addr>*>(link.send_buffer(sizeof(successor_frame<Addr>)));
 
 	frame->type = connection::frame_successor;
 
@@ -514,12 +556,14 @@ std::size_t do_generate_successor_frame(net_link& link, const Addr& sucessor_add
 
 void connection::send_next_frame()
 {
+	link_.clear_send_buffer();
+
 	if (outstanding_non_packet_frames_ & frame_bit_oob_threshold_update) {
-		oob_threshold_frame* frame = reinterpret_cast<oob_threshold_frame*>(link_.send_buffer.data());
+		oob_threshold_frame* frame = buffer_cast<oob_threshold_frame*>(link_.send_buffer(sizeof(oob_threshold_frame)));
 		frame->type = frame_oob_threshold_update;
 		u32(frame->oob_threshold, local_oob_threshold_);
 		boost::asio::async_write(link_.socket,
-		                         mutable_buffers_1(buffer(link_.send_buffer, sizeof(oob_threshold_frame))),
+		                         const_buffers_1(link_.sendable_buffer()),
 		                         boost::bind(&connection::frame_sent,
 		                                     shared_from_this(),
 		                                     frame_bit_oob_threshold_update,
@@ -527,10 +571,10 @@ void connection::send_next_frame()
 		                                     placeholders::bytes_transferred));
 	}
 	else if (outstanding_non_packet_frames_ & frame_bit_successor_request) {
-		boost::uint8_t* frame = reinterpret_cast<boost::uint8_t*>(link_.send_buffer.data());
+		boost::uint8_t* frame = buffer_cast<boost::uint8_t*>(link_.send_buffer(4));
 		*frame = frame_successor_request;
 		boost::asio::async_write(link_.socket,
-								 mutable_buffers_1(buffer(link_.send_buffer, 4)),
+								 const_buffers_1(link_.sendable_buffer()),
 		                         boost::bind(&connection::frame_sent,
 		                                     shared_from_this(),
 		                                     frame_bit_successor_request,
@@ -541,25 +585,26 @@ void connection::send_next_frame()
 	else if (outstanding_non_packet_frames_ & frame_bit_successor) {
 		ip::tcp::endpoint successor = node_.reverse_sucessor_endpoint(remote_identity_);
 
-		std::size_t frame_size;
 		if (successor.address().is_v4())
-			frame_size = do_generate_successor_frame(link_, successor.address().to_v4(), successor.port());
+			do_generate_successor_frame(link_, successor.address().to_v4(), successor.port());
 		else
-			frame_size = do_generate_successor_frame(link_, successor.address().to_v6(), successor.port());
+			do_generate_successor_frame(link_, successor.address().to_v6(), successor.port());
 		
 		boost::asio::async_write(link_.socket,
-								 mutable_buffers_1(buffer(link_.send_buffer, frame_size)),
+								 const_buffers_1(link_.sendable_buffer()),
 		                         boost::bind(&connection::frame_sent,
 		                                     shared_from_this(),
 		                                     frame_bit_successor,
 		                                     placeholders::error,
 		                                     placeholders::bytes_transferred));
-		DLOG(INFO) << std::string(node_.id()) << " Wrote " << frame_size << " bytes to socket";
+		DLOG(INFO) << std::string(node_.id()) << " Wrote " << buffer_size(link_.sendable_buffer()) << " bytes to socket";
 	}
 	else if (send_queue_.size()) {
 		DLOG(INFO) << "Sending packet from " << std::string(node_.id()) << " to " << std::string(remote_id());
 
-		send_queue_.front().send(link_, oob_threshold(), boost::bind(&connection::content_sent, shared_from_this(), placeholders::error, placeholders::bytes_transferred));
+		boost::asio::async_write(link_.socket,
+		                         send_queue_.front().msg->serialize(oob_threshold(), link_.send_buffer()),
+								 boost::bind(&connection::content_sent, shared_from_this(), placeholders::error, placeholders::bytes_transferred));
 	}
 }
 
@@ -601,16 +646,16 @@ void connection::redispatch_send_queue()
 	// the node may have been destroyed
 	if (lifecycle_ != cleanup) {
 		for (std::deque<queued_packet>::iterator it = send_queue_.begin(); it != send_queue_.end(); ++it) {
-			if (it->msg.type() == typeid(packet::ptr_t)) {
-				packet::ptr_t pkt(boost::get<packet::ptr_t>(it->msg));
+			packet::ptr_t pkt(boost::dynamic_pointer_cast<packet>(it->msg));
+			if (pkt) {
 				if (pkt->is_direct())
 					// this was a direct request, turn it into an error so the requester gets notified
-					pkt->to_reply(packet::not_found);
+					pkt->to_reply(packet::content_failure);
 				node_.dispatch(pkt);
 			}
 			else {
 				// fragments are always direct so unconditionaly reply with an error
-				::frame_fragment::ptr_t frag(boost::get<::frame_fragment::ptr_t>(it->msg));
+				::frame_fragment::ptr_t frag(boost::dynamic_pointer_cast<::frame_fragment>(it->msg));
 				frag->to_reply();
 				node_.fragment_received(shared_from_this(), frag);
 			}

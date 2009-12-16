@@ -45,18 +45,11 @@
 #include <vector>
 #include <set>
 
-using boost::asio::const_buffer;
-using boost::asio::mutable_buffer;
-using boost::asio::const_buffers_1;
-using boost::asio::mutable_buffers_1;
-using boost::asio::buffer_cast;
-using boost::asio::buffer_size;
-using boost::asio::buffer;
-
 typedef boost::uint8_t protocol_t;
 
 class network_key;
 
+/*
 class payload_buffer
 {
 public:
@@ -65,7 +58,36 @@ public:
 	virtual ~payload_buffer() {}
 };
 
-class heap_buffer : public payload_buffer
+
+typedef boost::shared_ptr<payload_buffer> payload_buffer_ptr;
+typedef boost::shared_ptr<const payload_buffer> const_payload_buffer_ptr;
+*/
+
+class content_frame
+{
+public:
+	typedef boost::shared_ptr<content_frame> ptr_t;
+
+	virtual std::vector<const_buffer> serialize(std::size_t threshold, mutable_buffer scratch) = 0;
+};
+
+class const_shared_buffer
+{
+public:
+	virtual const_buffer get() const = 0;
+	virtual ~const_shared_buffer() {}
+};
+
+class mutable_shared_buffer : public const_shared_buffer
+{
+public:
+	virtual mutable_buffer get() = 0;
+};
+
+typedef boost::shared_ptr<mutable_shared_buffer> payload_buffer_ptr;
+typedef boost::shared_ptr<const_shared_buffer>   const_payload_buffer_ptr;
+
+class heap_buffer : public mutable_shared_buffer
 {
 public:
 	heap_buffer(std::size_t size) : buffer_(size) {}
@@ -77,8 +99,17 @@ private:
 	std::vector<boost::uint8_t> buffer_;
 };
 
-typedef boost::shared_ptr<payload_buffer> payload_buffer_ptr;
-typedef boost::shared_ptr<const payload_buffer> const_payload_buffer_ptr;
+class sub_buffer : public const_shared_buffer
+{
+public:
+	sub_buffer(const_payload_buffer_ptr payload, const_buffer sub_buf) : payload_(payload), sub_buffer_(sub_buf) {}
+
+	virtual const_buffer get() const { return sub_buffer_; }
+
+private:
+	const_payload_buffer_ptr payload_;
+	const_buffer sub_buffer_;
+};
 
 extern const network_key key_max;
 

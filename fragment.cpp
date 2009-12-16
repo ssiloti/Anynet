@@ -102,9 +102,9 @@ std::size_t frame_fragment::serialize_header(boost::uint8_t* buf)
 	return sizeof(packed_fragment_header);
 }
 
-std::size_t frame_fragment::parse_header(const boost::uint8_t *header)
+std::size_t frame_fragment::parse_header(const_buffer buf)
 {
-	const packed_fragment_header* h = reinterpret_cast<const packed_fragment_header*>(header);
+	const packed_fragment_header* h = buffer_cast<const packed_fragment_header*>(buf);
 
 	protocol_ = h->protocol & 0x3F;
 	status_ = fragment_status(h->protocol >> 6);
@@ -120,7 +120,7 @@ std::size_t frame_fragment::parse_header(const boost::uint8_t *header)
 		return 0;
 }
 
-std::vector<const_buffer> frame_fragment::serialize(mutable_buffer scratch)
+std::vector<const_buffer> frame_fragment::serialize(std::size_t threshold, mutable_buffer scratch)
 {
 	DLOG(INFO) << "Sending fragment id=" << std::string(id());
 	assert(buffer_size(scratch) >= sizeof(packed_fragment_header));
@@ -129,7 +129,7 @@ std::vector<const_buffer> frame_fragment::serialize(mutable_buffer scratch)
 	buffers.push_back(buffer(scratch, serialize_header(buffer_cast<boost::uint8_t*>(scratch))));
 
 	if (status_ == status_attached) {
-		buffers.push_back(payload_->get());
+		buffers.push_back(buffer(payload_->get() + offset_, std::min(size_, threshold)));
 	}
 
 	return buffers;

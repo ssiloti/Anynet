@@ -37,7 +37,7 @@
 #include <glog/logging.h>
 
 #include "hunk.hpp"
-#include "protocol.hpp"
+#include "protocols/user_content.hpp"
 #include "key.hpp"
 #include "node.hpp"
 #include <boost/smart_ptr.hpp>
@@ -47,14 +47,14 @@
 #include "simulator.hpp"
 #endif
 
-class non_authoritative : public network_protocol
+class non_authoritative : public user_content
 {
 public:
 	static const protocol_t protocol_id = 1;
 
 	static void create(local_node& node)
 	{
-		network_protocol::ptr_t ptr(new non_authoritative(node));
+		boost::shared_ptr<non_authoritative> ptr(new non_authoritative(node));
 		ptr->register_handler();
 		ptr->start_vacume();
 	}
@@ -64,7 +64,7 @@ public:
 	template <typename Handler>
 	void retrieve_hunk(const network_key& key, Handler handler)
 	{
-		new_content_request(key, boost::bind(&non_authoritative::hunk_retrieved<Handler>, handler, _1));
+		new_content_request(key, 0, boost::bind(&non_authoritative::hunk_retrieved<Handler>, handler, _1));
 	}
 
 	virtual protocol_t id() { return protocol_id; }
@@ -86,7 +86,7 @@ public:
 	{
 #ifdef SIMULATION
 //		assert(!sim.node_created(node_id));
-		for (content_store::const_iterator hunk = stored_hunks_.begin(); hunk != stored_hunks_.end(); ) {
+		for (content_store<>::const_iterator hunk = stored_hunks_.begin(); hunk != stored_hunks_.end(); ) {
 			network_key hid = hunk->first;
 			++hunk;
 			stored_hunks_.unlink(hid);
@@ -110,7 +110,7 @@ private:
 		handler(content);
 	}
 
-	content_store stored_hunks_;
+	content_store<> stored_hunks_;
 };
 
 #endif

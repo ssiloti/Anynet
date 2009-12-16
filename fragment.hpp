@@ -97,7 +97,7 @@ private:
 	payload_buffer_ptr content_;
 };
 
-class frame_fragment : public boost::enable_shared_from_this<frame_fragment>
+class frame_fragment : public boost::enable_shared_from_this<frame_fragment>, public content_frame
 {
 public:
 	typedef boost::shared_ptr<frame_fragment> ptr_t;
@@ -120,6 +120,7 @@ public:
 	std::size_t offset() const { return offset_; }
 	std::size_t size() const { return size_; }
 	void trim_to(std::size_t s) { size_ = std::min(size_, s); }
+	void payload(const_payload_buffer_ptr p) { payload_ = p; }
 
 	fragment_status status() { return status_; }
 
@@ -131,17 +132,17 @@ public:
 	void to_reply(const_payload_buffer_ptr p);
 	void to_reply() { status_ = status_failed; }
 
-	std::vector<const_buffer> serialize(mutable_buffer scratch);
+	virtual std::vector<const_buffer> serialize(std::size_t threshold, mutable_buffer scratch);
 
 	template <typename Handler>
 	void receive(net_link& link, Handler handler)
 	{
-		if (link.valid_recv_bytes >= header_size())
+		if (link.valid_received_bytes() >= header_size())
 			header_received(link, handler, boost::system::error_code(), 0);
 		else
 			boost::asio::async_read(link.socket,
-			                        mutable_buffers_1(buffer(link.receive_buffer) + link.valid_recv_bytes),
-									boost::asio::transfer_at_least(header_size() - link.valid_recv_bytes),
+			                        mutable_buffers_1(link.receive_buffer()),
+									boost::asio::transfer_at_least(header_size() - link.valid_received_bytes()),
 			                        boost::bind(&frame_fragment::header_received<Handler>,
 			                                    shared_from_this(),
 												boost::ref(link),
@@ -150,92 +151,25 @@ public:
 			                                    placeholders::bytes_transferred));
 	}
 
-	template <typename Handler>
-	void receive_payload(net_link& link, framented_content::fragment_buffer payload, Handler handler)
-	{
-		if (buffer_size(payload.buf) == 0) {
-			ptr_t p;
-			handler(p);
-			return;
-		}
-
-		assert(payload.offset >= offset());
-		assert(buffer_size(payload.buf) <= size());
-
-		std::vector<mutable_buffer> buffers;
-
-		std::size_t head_excess = payload.offset - offset();
-
-		if (head_excess && link.valid_recv_bytes) {
-			std::size_t consumed_bytes = std::min(link.valid_recv_bytes, head_excess);
-			link.consume_receive_buffer(consumed_bytes);
-			head_excess -= consumed_bytes;
-		}
-
-		if (head_excess) {
-			boost::shared_ptr<heap_buffer> head_pad(new heap_buffer(head_excess));
-			padding_.push_back(head_pad);
-			buffers.push_back(head_pad->get());
-		}
-
-		std::size_t body_bytes = buffer_size(payload.buf);
-
-		if (body_bytes && link.valid_recv_bytes) {
-			std::size_t consumed_bytes = std::min(link.valid_recv_bytes, body_bytes);
-			std::memcpy(buffer_cast<void*>(payload.buf), link.receive_buffer.data(), consumed_bytes);
-			link.consume_receive_buffer(consumed_bytes);
-			body_bytes -= consumed_bytes;
-		}
-
-		if (body_bytes) {
-			buffers.push_back(payload.buf + (buffer_size(payload.buf) - body_bytes));
-		}
-
-		payload_ = payload.content;
-
-		std::size_t tail_excess = size() - buffer_size(payload.buf) - (payload.offset - offset());
-
-		if (tail_excess && link.valid_recv_bytes) {
-			std::size_t consumed_bytes = std::min(link.valid_recv_bytes, tail_excess);
-			link.consume_receive_buffer(consumed_bytes);
-			tail_excess -= consumed_bytes;
-		}
-
-		if (tail_excess) {
-			boost::shared_ptr<heap_buffer> tail_pad(new heap_buffer(tail_excess));
-			padding_.push_back(tail_pad);
-			buffers.push_back(tail_pad->get());
-		}
-
-		if (buffers.size())
-			boost::asio::async_read(link.socket,
-			                        buffers,
-			                        boost::bind(&frame_fragment::payload_received<Handler>,
-			                                    shared_from_this(),
-			                                    boost::ref(link),
-			                                    handler,
-			                                    placeholders::error,
-			                                    placeholders::bytes_transferred));
-		else
-			handler(shared_from_this());
-	}
-
 	// For future UDP support
 	std::size_t parse(const_buffer& buf)
 	{
 		if (buffer_size(buf) < header_size())
 			return 0;
 
-		std::size_t payload_size = parse_header(buffer_cast<const boost::uint8_t*>(buf));
+		std::size_t payload_size = parse_header(buf);
 
 		buf = buf + header_size();
 
 		return payload_size;
 	}
 
+	void attach_padding(boost::shared_ptr<heap_buffer> buf) { padding_.push_back(buf); }
+	void clear_padding() { padding_.clear(); }
+
 private:
 	std::size_t serialize_header(boost::uint8_t* buf);
-	std::size_t parse_header(const boost::uint8_t* header);
+	std::size_t parse_header(const_buffer buf);
 	std::size_t header_size();
 
 	template <typename Handler>
@@ -251,11 +185,9 @@ private:
 			return;
 		}
 
-		std::size_t payload_size = parse_header(link.receive_buffer.data());
-		link.valid_recv_bytes += bytes_transferred - header_size();
-
-		if (link.valid_recv_bytes)
-			std::memmove(link.receive_buffer.data(), link.receive_buffer.data() + header_size(), link.valid_recv_bytes);
+		std::size_t payload_size = parse_header(link.received_buffer());
+		link.received(header_size());
+		link.consume_receive_buffer(header_size());
 
 		ptr_t p(shared_from_this());
 		handler(p, payload_size);

@@ -73,97 +73,209 @@ struct stored_hunk
 typedef std::list<stored_hunk> stored_hunks_t;
 typedef stored_hunks_t::iterator hunk_descriptor_t;
 
-class content_store
+namespace detail
 {
-	// We have to put the mapping in a base class to ensure that it is initialized before the region
-	struct mapped_content_base
+// We have to put the mapping in a base class to ensure that it is initialized before the region
+struct mapped_content_base
+{
+	mapped_content_base(const std::string& path) : mapping(path.c_str(), read_write) {}
+	file_mapping mapping;
+};
+
+class content_store_base;
+
+}
+
+struct mapped_content : ::detail::mapped_content_base, public mutable_shared_buffer
+{
+	friend class ::detail::content_store_base;
+
+	typedef boost::shared_ptr<mapped_content> ptr;
+	typedef boost::shared_ptr<const mapped_content> const_ptr;
+
+	mapped_content(const std::string& path, std::size_t size)
+		: ::detail::mapped_content_base(path), region(mapping, read_write, 0, size), deleted(false)
+	{}
+
+	mapped_content(const std::string& path, std::size_t size, bool temp)
+		: ::detail::mapped_content_base(temp_path(path, size)), region(mapping, read_write, 0, size), deleted(true)
 	{
-		mapped_content_base(const std::string& path) : mapping(path.c_str(), read_write) {}
-		file_mapping mapping;
-	};
+		std::stringstream ss;
+		ss << mapping.get_name() << '-' << std::hex << this;
+		std::rename(mapping.get_name(), ss.str().c_str());
+	}
 
-public:
-	struct mapped_content : mapped_content_base, public payload_buffer
+	virtual mutable_buffer get() { return buffer(region.get_address(), region.get_size()); }
+	virtual const_buffer get() const { return buffer(region.get_address(), region.get_size()); }
+
+	~mapped_content()
 	{
-		friend class content_store;
-
-		mapped_content(const std::string& path, std::size_t size)
-			: mapped_content_base(path), region(mapping, read_write, 0, size), deleted(false)
-		{}
-
-		mapped_content(const std::string& path, std::size_t size, bool temp)
-			: mapped_content_base(temp_path(path, size)), region(mapping, read_write, 0, size), deleted(true)
-		{
+		if (deleted) {
 			std::stringstream ss;
 			ss << mapping.get_name() << '-' << std::hex << this;
-			std::rename(mapping.get_name(), ss.str().c_str());
-		}
-
-		virtual mutable_buffer get() { return buffer(region.get_address(), region.get_size()); }
-		virtual const_buffer get() const { return buffer(region.get_address(), region.get_size()); }
-
-		~mapped_content()
-		{
-			if (deleted) {
-				std::stringstream ss;
-				ss << mapping.get_name() << '-' << std::hex << this;
-				DLOG(INFO) << "deleting content " << ss.str().c_str();
-				region.~mapped_region();
-				mapping.~file_mapping();
+			DLOG(INFO) << "deleting content " << ss.str().c_str();
+			region.~mapped_region();
+			mapping.~file_mapping();
 #ifdef BOOST_WINDOWS
-				::DeleteFileA(ss.str().c_str());
+			::DeleteFileA(ss.str().c_str());
 #else
-				::unlink(ss.str().c_str());
+			::unlink(ss.str().c_str());
 #endif
-			}
 		}
-	private:
-		mapped_region region;
-		bool deleted;
+	}
+private:
+	mapped_region region;
+	bool deleted;
 
-		std::string temp_path(const std::string& path, std::size_t size);
-	};
+	std::string temp_path(const std::string& path, std::size_t size);
+};
 
-	struct stored_content
+struct stored_content
+{
+	stored_content(hunk_descriptor_t d) : desc(d) {}
+	boost::weak_ptr<mapped_content> content;
+	hunk_descriptor_t desc;
+};
+
+namespace detail
+{
+
+class content_store_base
+{
+public:
+	mapped_content::ptr get_temp(std::size_t size);
+
+protected:
+	content_store_base(const std::string& path)
+		: path_(path)
 	{
-		stored_content(hunk_descriptor_t d) : desc(d) {}
-		boost::weak_ptr<const mapped_content> content;
-		hunk_descriptor_t desc;
+	}
+
+	std::string content_path(const network_key& key, bool create_dirs=false) const;
+	stored_content do_load_content(boost::filesystem::directory_iterator file, protocol_t pid, local_node& node);
+	const_payload_buffer_ptr do_get(stored_content& stored);
+	mapped_content::const_ptr do_put(stored_content& stored, mapped_content::ptr content);
+	mapped_content::const_ptr do_put(stored_content& stored, std::vector<const_buffer> content);
+	void unlink_storage(stored_content& stored);
+	void do_flush(stored_content& stored);
+
+	std::string path_;
+};
+
+struct no_client_data {};
+
+}
+
+template <typename ClientHunkData = ::detail::no_client_data>
+class content_store : public ::detail::content_store_base
+{
+	struct content_descriptor : public stored_content, public ClientHunkData
+	{
+		content_descriptor(stored_content c) : stored_content(c) {}
+		ClientHunkData& client_data() const { return *this; }
 	};
 
 private:
-	typedef std::map<network_key, stored_content> stored_contents_t;
-	typedef stored_contents_t::iterator iterator;
+	typedef std::map<network_key, content_descriptor> stored_contents_t;
+	typedef typename stored_contents_t::iterator iterator;
 
 public:
-	typedef stored_contents_t::const_iterator const_iterator;
-	typedef boost::shared_ptr<mapped_content> mapped_content_ptr;
-	typedef boost::shared_ptr<const mapped_content> const_mapped_content_ptr;
+	typedef typename stored_contents_t::const_iterator const_iterator;
 
-	content_store(const std::string& path, protocol_t pid, local_node& node);
-	~content_store();
+	content_store(const std::string& path, protocol_t pid, local_node& node)
+		: content_store_base(path)
+	{
+		boost::filesystem::create_directories(boost::filesystem::path(path));
+		load_contents(path_, pid, node);
+	}
 
-	void flush();
+	~content_store()
+	{
+		flush();
+	}
+
+	void flush()
+	{
+		for (iterator content = stored_contents_.begin(); content != stored_contents_.end(); ++content)
+			do_flush(content->second);
+	}
 
 	const_iterator begin() const { return stored_contents_.begin(); }
 	const_iterator end() const { return stored_contents_.end(); }
 
-	const_iterator stat(const network_key& key) const { return stored_contents_.find(key); }
+	const_iterator stat(const network_key& key) { return stored_contents_.find(key); }
 
-	mapped_content_ptr get_temp(std::size_t size);
+	const_payload_buffer_ptr get(const network_key& key)
+	{
+		iterator stored_contents = stored_contents_.find(key);
 
-	const_mapped_content_ptr get(const network_key& key);
-	const_mapped_content_ptr put(hunk_descriptor_t desc, const_buffer content);
-	const_mapped_content_ptr put(hunk_descriptor_t desc, mapped_content_ptr content);
-	void unlink(const network_key& key);
+		if (stored_contents == stored_contents_.end())
+			return const_payload_buffer_ptr();
+
+		return do_get(stored_contents->second);
+	}
+
+	mapped_content::const_ptr put(hunk_descriptor_t desc, std::vector<const_buffer> content)
+	{
+		iterator stored_contents = stored_contents_.find(desc->id);
+
+		if (stored_contents != stored_contents_.end()) {
+			// On POSIX we should be using the rename to overwrite the existing file
+			// But windows cannot handle that, so don't bother for now
+			// This will only become an issue when we start doing multi-threading/processing
+			unlink_storage(stored_contents->second);
+		}
+		else {
+			stored_contents = stored_contents_.insert(std::make_pair(desc->id, stored_content(desc))).first;
+		}
+
+		stored_contents->second.desc = desc;
+
+		return do_put(stored_contents->second, content);
+	}
+
+	mapped_content::const_ptr put(hunk_descriptor_t desc, mapped_content::ptr content)
+	{
+		iterator stored_contents = stored_contents_.find(desc->id);
+
+		if (stored_contents != stored_contents_.end()) {
+			// On POSIX we should be using the rename to overwrite the existing file
+			// But windows cannot handle that, so don't bother for now
+			// This will only become an issue when we start doing multi-threading/processing
+			unlink_storage(stored_contents);
+		}
+		else {
+			stored_contents = stored_contents_.insert(std::make_pair(desc->id, stored_content(desc))).first;
+		}
+
+		stored_contents->second.desc = desc;
+
+		return do_put(stored_contents->second, content);
+	}
+
+	void unlink(const network_key& key)
+	{
+		iterator stored_contents = stored_contents_.find(key);
+		unlink_storage(stored_contents->second);
+		stored_contents_.erase(stored_contents);
+	}
 
 private:
-	void load_contents(boost::filesystem::path dir_path, protocol_t pid, local_node& node);
-	std::string content_path(const network_key& key, bool create_dirs=false) const;
-	void unlink_storage(iterator content);
+	void load_contents(boost::filesystem::path dir_path, protocol_t pid, local_node& node)
+	{
+		if (!boost::filesystem::exists(dir_path)) return;
+		boost::filesystem::directory_iterator end;
+		for (boost::filesystem::directory_iterator it( dir_path ); it != end; ++it) {
+			if (boost::filesystem::is_directory(it->status()))
+				load_contents(it->path(), pid, node);
+			else {
+				network_key key(it->filename());
+				stored_contents_.insert(std::make_pair(key, do_load_content(it, pid, node)));
+			}
+		}
+	}
 
 	stored_contents_t stored_contents_;
-	std::string path_;
 };
 
 #endif

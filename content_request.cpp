@@ -32,22 +32,23 @@
 // Contact:  Steven Siloti <ssiloti@gmail.com>
 
 #include "content_request.hpp"
+#include "protocols/user_content.hpp"
 #include "node.hpp"
 
 #ifdef SIMULATION
 #include "simulator.hpp"
 #endif
 
-void content_request::initiate_request(protocol_t protocol, const network_key& key, local_node& node)
+void content_request::initiate_request(protocol_t protocol, const network_key& key, local_node& node, std::size_t content_size)
 {
 	last_indirect_request_peer_ = node.id();
+	content_size_ = content_size;
 
 	packet::ptr_t pkt(new packet());
 	pkt->protocol(protocol);
 	pkt->source(node.id());
 	pkt->destination(key);
-	pkt->content_status(packet::content_requested);
-	pkt->content_size(0);
+	pkt->payload(packet::content_requested, new payload_content_request(content_size_));
 
 	connection::ptr_t con = node.local_request(pkt, key);
 
@@ -61,17 +62,11 @@ bool content_request::snoop_packet(local_node& node, packet::ptr_t pkt)
 	{
 	case packet::content_attached:
 		for (std::vector<keyed_handler_t>::iterator handler = handlers_.begin(); handler != handlers_.end(); ++handler)
-			(*handler)(pkt->payload());
+			(*handler)(pkt->payload_as<());
 		return true;
 	case packet::content_detached:
 		sources_ = pkt->sources();
 		if (direct_request_pending_ == ip::tcp::endpoint()) {
-			/*packet::ptr_t request(new packet());
-			request->protocol(pkt->protocol());
-			request->source(node.id());
-			request->destination(pkt->source());
-			request->content_status(packet::content_requested);
-			node.direct_request(sources_->sources.begin()->ep, request);*/
 			if (!partial_content_) {
 				partial_content_ = framented_content(node.get_protocol(pkt).get_payload_buffer(sources_->size));
 			}
@@ -86,8 +81,7 @@ bool content_request::snoop_packet(local_node& node, packet::ptr_t pkt)
 
 			pkt->destination(pkt->source());
 			pkt->source(node.id());
-			pkt->content_status(packet::content_requested);
-			pkt->content_size(0);
+			pkt->payload(packet::content_requested, new payload_content_request(content_size_));
 
 			connection::ptr_t con = node.local_request(pkt, last_indirect_request_peer_);
 
@@ -105,13 +99,6 @@ bool content_request::snoop_packet(local_node& node, packet::ptr_t pkt)
 		}
 		else if (pkt->source() == network_key(direct_request_pending_)) {
 			sources_->sources.erase(direct_request_pending_);
-
-		/*	packet::ptr_t request(new packet());
-			request->protocol(pkt->protocol());
-			request->source(node.id());
-			request->destination(pkt->source());
-			request->content_status(packet::content_requested);
-			node.direct_request(sources_->sources.begin()->ep, request);*/
 
 			std::pair<std::size_t, std::size_t> range = partial_content_->next_invalid_range();
 			frame_fragment::ptr_t frag(new frame_fragment(pkt->protocol(), pkt->source(), range.first, range.second));

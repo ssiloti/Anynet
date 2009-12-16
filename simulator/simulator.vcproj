@@ -191,10 +191,6 @@
 				>
 			</File>
 			<File
-				RelativePath="..\content_request.cpp"
-				>
-			</File>
-			<File
 				RelativePath="..\core.cpp"
 				>
 			</File>
@@ -237,6 +233,10 @@
 					RelativePath="..\non_authoritative.cpp"
 					>
 				</File>
+				<File
+					RelativePath="..\protocols\user_content.cpp"
+					>
+				</File>
 			</Filter>
 		</Filter>
 		<Filter
@@ -254,10 +254,6 @@
 			</File>
 			<File
 				RelativePath="..\connection.hpp"
-				>
-			</File>
-			<File
-				RelativePath="..\content_request.hpp"
 				>
 			</File>
 			<File
@@ -313,6 +309,10 @@
 				>
 				<File
 					RelativePath="..\protocols\non_authoritative.hpp"
+					>
+				</File>
+				<File
+					RelativePath="..\protocols\user_content.hpp"
 					>
 				</File>
 			</Filter>

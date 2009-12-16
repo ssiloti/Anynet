@@ -42,6 +42,7 @@
 #include <queue>
 
 class local_node;
+class content_sources;
 
 class content_request
 {
@@ -56,13 +57,14 @@ public:
 	void add_handler(const keyed_handler_t& handler) { handlers_.push_back(handler); }
 	bool timeout(local_node& node, packet::ptr_t pkt);
 
-	void initiate_request(protocol_t protocol, const network_key& key, local_node& node);
+	void initiate_request(protocol_t protocol, const network_key& key, local_node& node, std::size_t content_size);
 
 	framented_content::fragment_buffer get_fragment_buffer(std::size_t offset, std::size_t size);
 
 private:
+	std::size_t content_size_;
 	std::vector<keyed_handler_t> handlers_;
-	content_sources::ptr_t sources_;
+	boost::shared_ptr<content_sources> sources_;
 	ip::tcp::endpoint direct_request_pending_;
 	boost::optional<framented_content> partial_content_;
 	network_key last_indirect_request_peer_;

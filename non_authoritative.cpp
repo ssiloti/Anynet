@@ -35,7 +35,7 @@
 #include "node.hpp"
 
 non_authoritative::non_authoritative(local_node& node)
-	: network_protocol(node), stored_hunks_(node.config().content_store_path(), id(), node)
+	: user_content(node, protocol_id), stored_hunks_(node.config().content_store_path(), protocol_id, node)
 {
 }
 
@@ -51,7 +51,7 @@ network_key non_authoritative::content_id(const_payload_buffer_ptr content)
 
 void non_authoritative::store_content(hunk_descriptor_t desc, const_payload_buffer_ptr content)
 {
-	stored_hunks_.put(desc, content->get());
+	stored_hunks_.put(desc, std::vector<const_buffer>(1, content->get()));
 
 #ifdef SIMULATION
 	sim.stored_non_authoritative_hunk(desc->id);
@@ -60,11 +60,5 @@ void non_authoritative::store_content(hunk_descriptor_t desc, const_payload_buff
 
 void non_authoritative::insert_hunk(const_payload_buffer_ptr hunk)
 {
-	network_key key(hunk->get());
-	packet::ptr_t pkt(new packet());
-	pkt->destination(key);
-	pkt->content_status(packet::content_attached);
-	pkt->protocol(id());
-	pkt->payload(hunk);
-	node_.local_request(pkt);
+	new_content_store(hunk);
 }

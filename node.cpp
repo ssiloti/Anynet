@@ -32,6 +32,7 @@
 // Contact:  Steven Siloti <ssiloti@gmail.com>
 
 #include "node.hpp"
+#include "protocols/user_content.hpp"
 #include "config.hpp"
 #include "peer_cache.hpp"
 #include "packet.hpp"
@@ -42,13 +43,15 @@
 #include <boost/accumulators/statistics/variance.hpp>
 #include <limits>
 
+class user_content;
+
 #ifdef SIMULATION
 #include "simulator.hpp"
 #endif
 
 local_node::local_node(boost::asio::io_service& io_service, client_config& config)
 	: config_(config), acceptor_(io_service, ip::tcp::endpoint(ip::address::from_string(config.listen_ip()), config.listen_port())),
-	  public_endpoint_(acceptor_.local_endpoint()), created_(boost::posix_time::second_clock::universal_time())
+	  public_endpoint_(acceptor_.local_endpoint()), created_(boost::posix_time::second_clock::universal_time()), stored_size_(0)
 	  
 {
 	connection::accept(*this, acceptor_);
@@ -235,6 +238,41 @@ void local_node::bootstrap()
 		make_connection(seed_peer);
 }
 
+std::vector<protocol_t> local_node::supported_protocols() const
+{
+	std::vector<protocol_t> protocols;
+
+	for (std::map<protocol_t, network_protocol::ptr_t>::const_iterator protocol = protocol_handlers_.begin();
+		protocol != protocol_handlers_.end();
+		++protocol)
+	{
+		// don't count protocols if they are the basic user content handler
+		// we don't really "know" these protocols, the handler is only there
+		// so we can oblivisiously pass around requests and detached content
+		if (typeid(protocol->second.get()) != typeid(user_content))
+			protocols.push_back(protocol->second->id());
+	}
+
+	return protocols;
+}
+
+network_protocol::ptr_t local_node::validate_protocol(protocol_t protocol)
+{
+	std::map<protocol_t, network_protocol::ptr_t>::iterator protocol_handler = protocol_handlers_.find(protocol);
+
+	if (protocol_handler == protocol_handlers_.end())
+	{
+		if (is_user_content(protocol)) {
+			network_protocol::ptr_t new_protocol(new user_content(*this, protocol));
+			protocol_handler = protocol_handlers_.insert(std::make_pair(protocol, new_protocol)).first;
+		}
+		else
+			return network_protocol::ptr_t();
+	}
+
+	return protocol_handler->second;
+}
+
 connection::ptr_t local_node::local_request(packet::ptr_t pkt)
 {
 	snoop(pkt);
@@ -343,26 +381,7 @@ connection::ptr_t local_node::dispatch(packet::ptr_t pkt)
 
 connection::ptr_t local_node::dispatch(packet::ptr_t pkt, const network_key& inner_id, bool local_request )
 {	
-/*	if (pkt->content_status() != packet::content_requested) {
-		connection::ptr_t con = get_protocol(pkt).pickup_crumb(pkt->destination());
-		if (con) {
-			con->send(pkt);
-			return con;
-		}
-	}*/
-
-	std::size_t content_size;
-
-	switch (pkt->content_status()) {
-	case packet::content_attached:
-		content_size = buffer_size(pkt->payload()->get());
-		break;
-	case packet::content_detached:
-		content_size = pkt->sources()->size;
-		break;
-	default:
-		content_size = 0;
-	}
+	std::size_t content_size = pkt->payload()->content_size();
 
 	std::vector<connection::ptr_t>::iterator target = sucessor(pkt->destination(), inner_id, content_size);
 
@@ -380,7 +399,7 @@ connection::ptr_t local_node::dispatch(packet::ptr_t pkt, const network_key& inn
 	}
 	/*else if (pkt->content_status() == packet::content_requested) {
 			DLOG(INFO) << "Failed to process packet, dest=" << std::string(pkt->destination());
-			pkt->to_reply(packet::not_found);
+			pkt->to_reply(packet::content_failure);
 
 			if (!local_request)
 				snoop(pkt);
@@ -399,41 +418,15 @@ void local_node::incoming_packet(connection::ptr_t con, packet::ptr_t pkt, std::
 		return;
 	}
 
-	std::map<protocol_t, network_protocol::ptr_t>::iterator protocol_handler = protocol_handlers_.find(pkt->protocol());
+	network_protocol::ptr_t protocol_handler = validate_protocol(pkt->protocol());
 
-	if (protocol_handler == protocol_handlers_.end())
+	if (!protocol_handler)
 	{
-		// TODO: return error unkown protocol
+		receive_failure(con);
 		return;
 	}
 
-	if (payload_size == 0)
-		packet_received(con, pkt);
-	else {
-		switch (pkt->content_status())
-		{
-		case packet::content_attached:
-			con->receive_payload(pkt,
-								 protocol_handler->second->get_payload_buffer(payload_size),
-								 boost::protect(boost::bind(&local_node::packet_received, this, con, _1)));
-			break;
-		case packet::content_detached:
-			con->receive_payload(pkt,
-			                     protocol_handler->second->get_content_sources(pkt->source(), payload_size),
-			                     boost::protect(boost::bind(&local_node::packet_received, this, con, _1)));
-			break;
-		case packet::content_requested:
-			{
-				// TODO: return an error packet to let our neighbor know that we're chucking his extra data
-				payload_buffer_ptr buf(new heap_buffer(payload_size));
-				con->receive_payload(pkt,
-				                     buf,
-				                     boost::protect(boost::bind(&local_node::packet_received, this, con, _1)));
-			}
-			break;
-		}
-		
-	}
+	protocol_handler->receive_payload(con, pkt, payload_size);
 }
 
 void local_node::packet_received(connection::ptr_t con, packet::ptr_t pkt)
@@ -473,10 +466,7 @@ void local_node::packet_received(connection::ptr_t con, packet::ptr_t pkt)
 	if (!con->accepts_ib_traffic()) {
 		// This packet is from an out-of-band peer, yet we didn't have a reply
 		// Return an error
-		pkt->source(pkt->destination());
-		pkt->destination(con->remote_id());
-		pkt->content_status(packet::content_failure);
-		pkt->payload(packet::not_found);
+		protocol.to_content_location_failure(pkt);
 		con->send(pkt);
 		return;
 	}
@@ -490,11 +480,7 @@ void local_node::packet_received(connection::ptr_t con, packet::ptr_t pkt)
 			// we don't want this packet going back through the normal dispatch path
 			pkt->mark_direct();
 
-			network_key tmp = pkt->source();
-			pkt->source(pkt->destination());
-			pkt->destination(tmp);
-			pkt->content_status(packet::content_requested);
-			pkt->content_size(0);
+			protocol.request_from_location_failure(pkt);
 			(*target)->send(pkt);
 			return;
 		}
@@ -541,7 +527,7 @@ void local_node::packet_received(connection::ptr_t con, packet::ptr_t pkt)
 				(*target)->send(pkt);
 			}
 			else {
-				pkt->to_reply(packet::not_found);
+				protocol.to_content_location_failure(pkt);
 				con->send(pkt);
 				protocol.pickup_crumb(std::make_pair(pkt->destination(), pkt->source()));
 			}
@@ -550,7 +536,7 @@ void local_node::packet_received(connection::ptr_t con, packet::ptr_t pkt)
 	else if (pkt->content_status() == packet::content_requested) {
 		// peer is closer than us to the destination and we couldn't satisfy it ourselves, we can't foward this
 		// so return an error
-		pkt->to_reply(packet::not_found);
+		protocol.to_content_location_failure(pkt);
 		con->send(pkt);
 	}
 }
@@ -563,28 +549,19 @@ void local_node::incoming_fragment(connection::ptr_t con, frame_fragment::ptr_t 
 		return;
 	}
 
-	std::map<protocol_t, network_protocol::ptr_t>::iterator protocol_handler = protocol_handlers_.find(frag->protocol());
+	network_protocol::ptr_t protocol_handler = validate_protocol(frag->protocol());
 
-	if (protocol_handler == protocol_handlers_.end())
-	{
-		// TODO: return error unkown protocol
+	if (!protocol_handler) {
+		receive_failure(con);
 		return;
 	}
 
-	if (payload_size) {
-		con->receive_payload(frag,
-		                     protocol_handler->second->get_fragment_buffer(frag),
-		                     boost::protect(boost::bind(&local_node::fragment_received, this, con, _1)));
-	}
-	else {
-		fragment_received(con, frag);
-	}
-
+	boost::dynamic_pointer_cast<user_content>(protocol_handler)->incoming_fragment(con, frag, payload_size);
 }
 
 void local_node::fragment_received(connection::ptr_t con, frame_fragment::ptr_t frag)
 {
-	get_protocol(frag).snoop_fragment(con->remote_endpoint(), frag);
+	boost::dynamic_pointer_cast<user_content>(validate_protocol(frag->protocol()))->snoop_fragment(con->remote_endpoint(), frag);
 }
 
 void local_node::recompute_identity()
@@ -770,6 +747,7 @@ hunk_descriptor_t local_node::cache_local_request(protocol_t pid, network_key id
 
 	try_prune_cache(size, 0, boost::posix_time::time_duration(0, 0, 0, 0));
 	stored_hunks_.push_back(stored_hunk(pid, id, size, 0, true));
+	stored_size_ += size;
 	return --stored_hunks_.end();
 }
 
@@ -787,6 +765,7 @@ hunk_descriptor_t local_node::cache_remote_request(protocol_t pid, network_key i
 		return stored_hunks_.end();
 
 	stored_hunks_.push_back(stored_hunk(pid, id, size, closer, false));
+	stored_size_ += size;
 	return --stored_hunks_.end();
 }
 
@@ -797,6 +776,7 @@ hunk_descriptor_t local_node::cache_store(protocol_t pid, network_key id, std::s
 	if (closer < 2) {
 		try_prune_cache(size, closer, boost::posix_time::time_duration(0, 0, 0, 0));
 		stored_hunks_.push_back(stored_hunk(pid, id, size, closer, false));
+		stored_size_ += size;
 		return --stored_hunks_.end();
 	}
 
@@ -835,6 +815,7 @@ bool local_node::try_prune_cache(std::size_t size, int closer_peers, boost::posi
 				return true;
 			}
 			needed_bytes_ -= hunk->size;
+			stored_size_ -= hunk->size;
 		}
 
 		// if we get here it means we failed to free up enough space :(
@@ -847,5 +828,6 @@ bool local_node::try_prune_cache(std::size_t size, int closer_peers, boost::posi
 hunk_descriptor_t local_node::load_existing_hunk(protocol_t pid, network_key id, std::size_t size)
 {
 	stored_hunks_.push_back(stored_hunk(pid, id, size, closer_peers(id), false));
+	stored_size_ += size;
 	return --stored_hunks_.end();
 }

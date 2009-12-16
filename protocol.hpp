@@ -37,7 +37,7 @@
 #include <glog/logging.h>
 
 #include "packet.hpp"
-#include "content_request.hpp"
+#include "connection.hpp"
 #include <boost/asio/deadline_timer.hpp>
 #include <boost/smart_ptr.hpp>
 #include <boost/enable_shared_from_this.hpp>
@@ -45,7 +45,6 @@
 #include <boost/cstdint.hpp>
 
 class local_node;
-class connection;
 
 class network_protocol : public boost::enable_shared_from_this<network_protocol>
 {
@@ -59,6 +58,7 @@ class network_protocol : public boost::enable_shared_from_this<network_protocol>
 		boost::asio::deadline_timer timeout;
 	};
 
+protected:
 	const static boost::posix_time::time_duration min_successor_source_age;
 
 public:
@@ -80,71 +80,40 @@ public:
 	virtual ~network_protocol() {}
 	virtual protocol_t id() = 0;
 
-	void snoop_packet(packet::ptr_t pkt);
-	void snoop_fragment(ip::tcp::endpoint src, frame_fragment::ptr_t frag);
+	virtual void receive_payload(connection::ptr_t con, packet::ptr_t pkt, std::size_t payload_size) = 0;
 
-	virtual payload_buffer_ptr get_payload_buffer(std::size_t size) = 0;
+	// Convert request packet to general failure
+	virtual void to_content_location_failure(packet::ptr_t pkt) = 0;
+	// Convert general failure packet to request, used for desperation mode
+	virtual void request_from_location_failure(packet::ptr_t pkt) = 0;
+
+	void snoop_packet(packet::ptr_t pkt);
+
 	virtual void prune_hunk(const network_key& id) = 0;
-	framented_content::fragment_buffer get_fragment_buffer(frame_fragment::ptr_t frag);
-	content_sources::ptr_t get_content_sources(network_key id, std::size_t size);
 
 	void register_handler();
-	void start_vacume();
-
-	void new_content_request(const network_key& key, const content_request::keyed_handler_t& handler = content_request::keyed_handler_t());
-	bool attach_remote_request_handler(const network_key& key, const network_key& requester);
 
 	void drop_crumb(const std::pair<network_key, network_key>& k, boost::weak_ptr<connection> c);
 	boost::shared_ptr<connection> pickup_crumb(const std::pair<network_key, network_key>& k, const boost::system::error_code& error = boost::system::error_code());
 	boost::shared_ptr<connection> get_crumb(const std::pair<network_key, network_key>& k);
 
-	void shutdown() { shutting_down_ = true; vacume_sources_.cancel(); response_handlers_.clear(); crumbs_.clear(); }
+	virtual void shutdown() { shutting_down_ = true; crumbs_.clear(); }
 
 protected:
+	typedef std::map<network_key, boost::array<boost::posix_time::ptime, 2> > content_requests_t;
+
 	network_protocol(local_node& node);
 
-	virtual const_payload_buffer_ptr get_content(const network_key& key) = 0;
-	virtual void store_content(hunk_descriptor_t desc, const_payload_buffer_ptr content) = 0;
-	virtual network_key content_id(const_payload_buffer_ptr content) = 0;
+	virtual void snoop_packet_payload(packet::ptr_t pkt) = 0;
 
 	local_node& node_;
 	network_key node_id;
+	content_requests_t recent_requests_;
+	bool shutting_down_;
 
 private:
-	struct remote_request_handler
-	{
-		remote_request_handler(network_protocol& p, network_key requester, network_key requested) : protocol_(p), requester(requester), requested(requested) {}
-		void operator()(const_payload_buffer_ptr content);
-		network_key requester, requested;
-		network_protocol& protocol_;
-	};
-
-	struct response_handler
-	{
-		response_handler(boost::asio::io_service& ios)
-			: timeout(ios) { timeout.expires_from_now(boost::posix_time::seconds(5)); }
-		content_request request;
-		boost::asio::deadline_timer timeout;
-	};
-
-	typedef std::map<network_key, boost::shared_ptr<response_handler> > response_handlers_t;
-	typedef std::map<network_key, content_sources::ptr_t> content_sources_t;
-	typedef std::map<network_key, boost::array<boost::posix_time::ptime, 2> > content_requests_t;
-
-	void remove_response_handler(network_key key, const boost::system::error_code& error);
-
-	void vacume_sources(const boost::system::error_code& error = boost::system::error_code());
 
 	crumbs_t crumbs_;
-	response_handlers_t response_handlers_;
-	content_sources_t content_sources_;
-	content_requests_t recent_requests_;
-	boost::asio::deadline_timer vacume_sources_;
-	bool shutting_down_;
 };
-
-std::size_t oob_endpoint_size(const local_node& node);
-boost::uint8_t* encode_endpoint(ip::tcp::endpoint ep, boost::uint8_t* buf);
-ip::tcp::endpoint decode_endpoint(const local_node& node, boost::uint8_t* buf);
 
 #endif

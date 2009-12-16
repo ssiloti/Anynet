@@ -54,7 +54,6 @@ class connection : public boost::enable_shared_from_this<connection>, boost::non
 {
 	const static int min_oob_threshold = 8000;
 	const static boost::posix_time::time_duration target_latency;
-	friend class packet;
 public:
 	typedef boost::shared_ptr<connection> ptr_t;
 	typedef boost::weak_ptr<connection> weak_ptr_t;
@@ -99,6 +98,7 @@ public:
 	bool is_connected() const { return lifecycle_ == connected; }
 	boost::posix_time::time_duration age() { return boost::posix_time::second_clock::universal_time() - established_; }
 	bool is_transfer_outstanding() const { return transfer_outstanding_ || send_queue_.size() > 0; }
+	bool supports_protocol(protocol_t p) { return std::find(supported_protocols_.begin(), supported_protocols_.end(), p) != supported_protocols_.end(); }
 
 	void send_reverse_successor()
 	{
@@ -118,13 +118,80 @@ public:
 
 	void disconnect();
 
-	void send(const packet::ptr_t pkt);
-	void send(const frame_fragment::ptr_t frag);
+	void send(packet::ptr_t pkt);
+	void send(frame_fragment::ptr_t frag);
+
+	template <typename Handler>
+	void receive_payload(std::size_t payload_size, Handler handler)
+	{
+		if (payload_size > link_.valid_received_bytes()) {
+			boost::asio::async_read(link_.socket,
+			                        mutable_buffers_1(link_.receive_buffer(payload_size)),
+									boost::asio::transfer_at_least(payload_size - link_.valid_received_bytes()),
+									boost::bind(&connection::payload_received<Handler>,
+			                                    shared_from_this(),
+			                                    handler,
+												payload_size,
+			                                    placeholders::error,
+			                                    placeholders::bytes_transferred));
+			link_.consume_receive_buffer(link_.valid_received_bytes());
+		}
+		else {
+			payload_received(handler, payload_size, boost::system::error_code(), 0);
+		}
+	}
+
+	template <typename Handler>
+	void receive_payload(std::vector<mutable_buffer> bufs, Handler handler)
+	{
+		std::vector<mutable_buffer>::iterator begin = bufs.begin();
+		while (begin != bufs.end()) {
+			std::size_t consumed = std::min(link_.valid_received_bytes(), buffer_size(*begin));
+			std::memcpy(buffer_cast<void*>(*begin),
+			            buffer_cast<const void*>(link_.received_buffer()),
+			            consumed);
+			link_.consume_receive_buffer(consumed);
+			if (consumed == buffer_size(*begin))
+				++begin;
+			else {
+				(*begin) = (*begin) + consumed;
+				break;
+			}
+		}
+
+		if (begin != bufs.end()) {
+			bufs.erase(bufs.begin(), begin);
+			boost::asio::async_read(link_.socket,
+			                        bufs,
+									boost::bind(&connection::payload_received<Handler>,
+			                                    shared_from_this(),
+			                                    handler,
+			                                    placeholders::error,
+			                                    placeholders::bytes_transferred));
+		}
+		else {
+			payload_received(handler, boost::system::error_code(), 0);
+		}
+	}
 
 	template <typename Message, typename Payload, typename Handler>
 	void receive_payload(Message msg, Payload payload, Handler handler)
 	{
-		msg->receive_payload(link_, payload, boost::protect(boost::bind(&connection::payload_received<Message, Handler>, shared_from_this(), handler, _1)));
+		msg->receive_payload(link_,
+		                     payload,
+		                     boost::protect(boost::bind(&connection::payload_received<Handler>,
+		                                                shared_from_this(),
+		                                                handler,
+		                                                const_buffer(),
+		                                                placeholders::error,
+		                                                placeholders::bytes_transferred)));
+	}
+
+	std::size_t discard_payload(std::size_t bytes)
+	{
+		std::size_t consumable = std::min(bytes, link_.valid_received_bytes());
+		link_.consume_receive_buffer(consumable);
+		return consumable;
 	}
 
 	static ptr_t connect(local_node& node, ip::tcp::endpoint peer, routing_type rtype);
@@ -148,25 +215,9 @@ private:
 private:
 	struct queued_packet
 	{
-		typedef boost::variant<packet::ptr_t, frame_fragment::ptr_t> message;
-		queued_packet(message m) : msg(m), entered(boost::posix_time::microsec_clock::universal_time()) {}
-		message msg;
+		queued_packet(content_frame::ptr_t m) : msg(m), entered(boost::posix_time::microsec_clock::universal_time()) {}
+		content_frame::ptr_t msg;
 		boost::posix_time::ptime entered;
-
-		template <typename Handler>
-		void send(net_link& link, std::size_t oob_threshold, Handler handler)
-		{
-			if (msg.type() == typeid(packet::ptr_t)) {
-				packet::ptr_t pkt(boost::get<packet::ptr_t>(msg));
-				DLOG(INFO) << "Content status: " << pkt->content_status() << " Destination: " << std::string(pkt->destination()) << " Source: " << std::string(pkt->source());
-				boost::asio::async_write(link.socket, pkt->serialize(buffer(link.send_buffer)), handler);
-			}
-			else {
-				frame_fragment::ptr_t frag = boost::get<frame_fragment::ptr_t>(msg);
-				frag->trim_to(oob_threshold);
-				boost::asio::async_write(link.socket, frag->serialize(buffer(link.send_buffer)), handler);
-			}
-		}
 	};
 
 	struct pending_ack
@@ -197,12 +248,32 @@ private:
 	void incoming_fragment(frame_fragment::ptr_t, std::size_t payload_size);
 	void receive_next_frame();
 
-	template <typename Message, typename Handler>
-	void payload_received(Handler handler, Message msg)
+	template <typename Handler>
+	void payload_received(Handler handler, const boost::system::error_code& error, std::size_t bytes_transfered)
 	{
-		if (msg)
+		if (!error) {
+			handler();
+			update_oob_threshold();
 			receive_next_frame();
-		handler(msg);
+		}
+		else {
+			node_.receive_failure(shared_from_this());
+		}
+	}
+
+	template <typename Handler>
+	void payload_received(Handler handler, std::size_t payload_size, const boost::system::error_code& error, std::size_t bytes_transfered)
+	{
+		if (!error) {
+			link_.received(bytes_transfered);
+			handler(buffer(link_.received_buffer(), payload_size));
+			link_.consume_receive_buffer(payload_size);
+			update_oob_threshold();
+			receive_next_frame();
+		}
+		else {
+			node_.receive_failure(shared_from_this());
+		}
 	}
 
 	std::size_t oob_threshold_size();
@@ -231,12 +302,13 @@ private:
 	void connection_accepted(const boost::system::error_code& error, ip::tcp::acceptor& incoming);
 	void write_handshake(const boost::system::error_code& error);
 	void read_handshake(const boost::system::error_code& error, std::size_t bytes_transferred);
+	void handshake_received(const boost::system::error_code& error, std::size_t bytes_transferred);
 	void complete_connection(const boost::system::error_code& error, std::size_t bytes_transferred);
 
 	template <typename Adr>
 	const_buffer do_generate_handshake();
 	template <typename Adr>
-	bool do_parse_handshake();
+	unsigned do_parse_handshake();
 
 	local_node& node_;
 	net_link link_;
@@ -250,6 +322,7 @@ private:
 	boost::uint16_t incoming_port_;
 	boost::posix_time::ptime established_;
 	routing_type routing_type_;
+	std::vector<protocol_t> supported_protocols_;
 	lifecycle lifecycle_;
 	packet::ptr_t pending_recv_;
 	bool transfer_outstanding_;

@@ -54,7 +54,6 @@ struct link_handshake
 	boost::uint8_t remote_ip[Adr::bytes_type::static_size];
 	boost::uint8_t rsvd[2];
 	boost::uint8_t incoming_port[2];
-	boost::uint8_t remote_id[network_key::packed_size];
 	boost::uint8_t supported_protocol_count;
 	boost::uint8_t supported_protocols[1];
 };
@@ -76,7 +75,7 @@ struct successor_frame
 };
 
 connection::connection(local_node& node, routing_type rtype)
-: node_(node), link_(node.io_service()), routing_type_(rtype), incoming_port_(0),
+: node_(node), link_(node.io_service(), node.context), routing_type_(rtype), incoming_port_(0),
 	lifecycle_(connecting), oob_threshold_(min_oob_threshold), local_oob_threshold_(min_oob_threshold), transfer_outstanding_(false),
 	outstanding_non_packet_frames_(0)
 {
@@ -86,7 +85,7 @@ connection::connection(local_node& node, routing_type rtype)
 ip::tcp::endpoint connection::remote_endpoint() const
 {
 	boost::system::error_code error;
-	return ip::tcp::endpoint(link_.socket.remote_endpoint(error).address(), incoming_port_);
+	return ip::tcp::endpoint(link_.socket.lowest_layer().remote_endpoint(error).address(), incoming_port_);
 }
 
 void connection::starting_connection()
@@ -109,7 +108,10 @@ connection::ptr_t connection::connect(local_node& node, ip::tcp::endpoint peer, 
 	ptr_t con(new connection(node, rtype));
 	con->starting_connection();
 	con->incoming_port_ = peer.port();
-	con->link_.socket.async_connect( peer, boost::bind(&connection::write_handshake, con, placeholders::error) );
+	con->link_.socket.lowest_layer().async_connect( peer, boost::bind(&connection::ssl_handshake,
+	                                                                  con,
+	                                                                  boost::asio::ssl::stream_base::client,
+	                                                                  placeholders::error) );
 	return con;
 }
 
@@ -118,12 +120,13 @@ void connection::connection_accepted(const boost::system::error_code& error, ip:
 	if (!error && lifecycle_ == connecting) {
 		ptr_t con(new connection(node_, ib));
 		con->starting_connection();
-		incoming.async_accept( con->link_.socket, boost::bind(&connection::connection_accepted,
-															  con,
-															  placeholders::error,
-															  boost::ref(incoming)) );
+		incoming.async_accept( con->link_.socket.lowest_layer(),
+		                       boost::bind(&connection::connection_accepted,
+		                                   con,
+		                                   placeholders::error,
+		                                   boost::ref(incoming)) );
 		
-		write_handshake(boost::system::error_code());
+		ssl_handshake(boost::asio::ssl::stream_base::server, boost::system::error_code());
 	}
 	else {
 		if (lifecycle_ != cleanup) {
@@ -131,6 +134,17 @@ void connection::connection_accepted(const boost::system::error_code& error, ip:
 			stillborn();
 		}
 	}
+}
+
+void connection::ssl_handshake(boost::asio::ssl::stream_base::handshake_type type, const boost::system::error_code& error)
+{
+	if (error && lifecycle_ != cleanup) {
+		disconnect();
+		stillborn();
+		return;
+	}
+
+	link_.socket.async_handshake(type, boost::bind(&connection::write_handshake, shared_from_this(), boost::asio::placeholders::error));
 }
 
 void connection::write_handshake(const boost::system::error_code& error)
@@ -156,7 +170,7 @@ void connection::read_handshake(const boost::system::error_code& error, std::siz
 	if (!error && lifecycle_ == connecting) {
 		std::size_t handshake_min_size;
 
-		if (link_.socket.remote_endpoint().address().is_v4())
+		if (link_.socket.lowest_layer().remote_endpoint().address().is_v4())
 			handshake_min_size = sizeof(link_handshake<ip::address_v4>);
 		else
 			handshake_min_size = sizeof(link_handshake<ip::address_v6>);
@@ -188,7 +202,7 @@ const_buffer connection::do_generate_handshake()
 	handshake->protocol = link_.protocol_version;
 	handshake->type = routing_type_;
 
-	typename Adr::bytes_type peer_ip = to<Adr>(link_.socket.remote_endpoint().address()).to_bytes();
+	typename Adr::bytes_type peer_ip = to<Adr>(link_.socket.lowest_layer().remote_endpoint().address()).to_bytes();
 	std::memcpy(handshake->remote_ip, peer_ip.data(), peer_ip.size());
 
 	u16(handshake->incoming_port, node_.config().listen_port());
@@ -203,20 +217,20 @@ const_buffer connection::generate_handshake()
 {
 //	DLOG(INFO) << "Generating handshake";
 
-	if (link_.socket.remote_endpoint().address().is_v4())
+	if (link_.socket.lowest_layer().remote_endpoint().address().is_v4())
 		return do_generate_handshake<ip::address_v4>();
 	else
 		return do_generate_handshake<ip::address_v6>();
 }
 
 template <typename Adr>
-unsigned connection::do_parse_handshake()
+bool connection::do_parse_handshake()
 {
 //	DLOG(INFO) << "Parsing handshake";
 	const link_handshake<Adr>* handshake = buffer_cast<const link_handshake<Adr>*>(link_.received_buffer());
 
 	if (handshake->sig[0] != 'A' || handshake->sig[1] != 'N' || handshake->protocol != link_.protocol_version)
-		return 0;
+		return false;
 
 	routing_type_ = std::min(routing_type_, connection::routing_type(handshake->type & 0x03));
 	incoming_port_ = u16(handshake->incoming_port);
@@ -227,7 +241,8 @@ unsigned connection::do_parse_handshake()
 
 	supported_protocols_.resize(handshake->supported_protocol_count);
 	link_.consume_receive_buffer(sizeof(link_handshake<Adr>) - 1);
-	return handshake->supported_protocol_count;
+
+	return true;
 }
 
 void connection::handshake_received(const boost::system::error_code& error, std::size_t bytes_transferred)
@@ -242,15 +257,15 @@ void connection::handshake_received(const boost::system::error_code& error, std:
 
 	link_.received(bytes_transferred);
 
-	unsigned supported_protocols;
+	bool handshake_valid;
 
-	if (link_.socket.remote_endpoint().address().is_v4())
-		supported_protocols = do_parse_handshake<ip::address_v4>();
+	if (link_.socket.lowest_layer().remote_endpoint().address().is_v4())
+		handshake_valid = do_parse_handshake<ip::address_v4>();
 	else
-		supported_protocols = do_parse_handshake<ip::address_v6>();
+		handshake_valid = do_parse_handshake<ip::address_v6>();
 
-	if (!supported_protocols) {
-		link_.socket.close();
+	if (!handshake_valid) {
+		link_.socket.lowest_layer().close();
 		DLOG(INFO) << "Error parsing handshake";
 		return;
 	}
@@ -263,10 +278,10 @@ void connection::handshake_received(const boost::system::error_code& error, std:
 	remote_identity_ = network_key(link_.socket.remote_endpoint().address());
 #endif
 
-	if (supported_protocols > link_.valid_received_bytes())
+	if (supported_protocols_.size() > link_.valid_received_bytes())
 		boost::asio::async_read(link_.socket,
 		                        mutable_buffers_1(link_.receive_buffer()),
-								boost::asio::transfer_at_least(supported_protocols - link_.valid_received_bytes()),
+								boost::asio::transfer_at_least(supported_protocols_.size() - link_.valid_received_bytes()),
 		                        boost::bind(&connection::complete_connection,
 		                                    shared_from_this(),
 		                                    placeholders::error,
@@ -322,11 +337,12 @@ void connection::send(frame_fragment::ptr_t frag)
 
 void connection::content_sent(const boost::system::error_code& error, std::size_t bytes_transfered)
 {
-	if (!error && link_.socket.is_open()) {
+	if (!error && link_.socket.lowest_layer().is_open()) {
 
 	//	DLOG(INFO) << std::string(node_.id()) << " Sent " << bytes_transfered << " bytes of content";
 
 		ack_queue_.push_back(pending_ack(send_queue_.front().entered, bytes_transfered));
+		node_.sent_content(remote_id(), bytes_transfered);
 		send_queue_.pop_front();
 
 		send_next_frame();
@@ -335,7 +351,7 @@ void connection::content_sent(const boost::system::error_code& error, std::size_
 		DLOG(INFO) << std::string(node_.id()) << " Failed sending packet";
 		if (lifecycle_ != cleanup) {
 			lifecycle_ = disconnecting;
-			link_.socket.shutdown(ip::tcp::socket::shutdown_send);
+			link_.socket.lowest_layer().shutdown(ip::tcp::socket::shutdown_send);
 			node_.send_failure(shared_from_this());
 			redispatch_send_queue();
 		}
@@ -500,7 +516,7 @@ void connection::parse_oob_threshold()
 
 std::size_t connection::successor_size()
 {
-	if (link_.socket.remote_endpoint().address().is_v4())
+	if (link_.socket.lowest_layer().remote_endpoint().address().is_v4())
 		return sizeof(successor_frame<ip::address_v4>);
 	else
 		return sizeof(successor_frame<ip::address_v6>);
@@ -524,7 +540,7 @@ void connection::parse_successor()
 	ip::tcp::endpoint successor;
 
 	std::size_t consumed;
-	if (link_.socket.remote_endpoint().address().is_v4())
+	if (link_.socket.lowest_layer().remote_endpoint().address().is_v4())
 		consumed = do_parse_successor<ip::address_v4>(link_.received_buffer(), successor);
 	else
 		consumed = do_parse_successor<ip::address_v6>(link_.received_buffer(), successor);
@@ -616,7 +632,7 @@ void connection::frame_sent(frame_bits frame_bit, const boost::system::error_cod
 	if (error) {
 		if (lifecycle_ == connected) {
 			lifecycle_ = disconnecting;
-			link_.socket.shutdown(ip::tcp::socket::shutdown_send);
+			link_.socket.lowest_layer().shutdown(ip::tcp::socket::shutdown_send);
 			node_.send_failure(shared_from_this());
 			redispatch_send_queue();
 		}
@@ -628,10 +644,11 @@ void connection::frame_sent(frame_bits frame_bit, const boost::system::error_cod
 
 void connection::disconnect()
 {
-	if (link_.socket.is_open()) {
+	if (link_.socket.lowest_layer().is_open()) {
+	//	link_.socket.async_shutdown(boost::bind(&connection::link_shutdown, shared_from_this()));
 		boost::system::error_code error;
-		link_.socket.shutdown(ip::tcp::socket::shutdown_both, error);
-		link_.socket.close();
+		link_.socket.lowest_layer().shutdown(ip::tcp::socket::shutdown_both, error);
+		link_.socket.lowest_layer().close();
 	}
 
 	if (lifecycle_ != cleanup) {
@@ -663,3 +680,7 @@ void connection::redispatch_send_queue()
 	}
 	send_queue_.clear();
 }
+
+//void connection::link_shutdown(const boost::system::error_code& error)
+//{
+//}

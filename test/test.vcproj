@@ -41,8 +41,8 @@
 			<Tool
 				Name="VCCLCompilerTool"
 				Optimization="0"
-				AdditionalIncludeDirectories="..\client;..;&quot;C:\Program Files\Common Files\glog\src\windows&quot;;&quot;C:\Program Files\Common Files\Boost&quot;;&quot;C:\Program Files\Common Files\openssl\inc32&quot;"
-				PreprocessorDefinitions="_SCL_SECURE_NO_WARNINGS"
+				AdditionalIncludeDirectories="..\client;..;&quot;C:\Program Files\Common Files\glog\src\windows&quot;;&quot;C:\Program Files\Common Files\Boost&quot;;&quot;C:\Program Files\Common Files\openssl\inc32&quot;;&quot;C:\Program Files\Common Files\berkeleydb\dbinc&quot;;&quot;C:\Program Files\Common Files\berkeleydb\build_windows&quot;;&quot;C:\Program Files\Common Files\berkeleydb\stl&quot;"
+				PreprocessorDefinitions="NOMINMAX;_CRT_SECURE_NO_WARNINGS;_SCL_SECURE_NO_WARNINGS"
 				MinimalRebuild="true"
 				ExceptionHandling="2"
 				BasicRuntimeChecks="3"
@@ -63,9 +63,9 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalDependencies="libeay32.lib libglog.lib"
+				AdditionalDependencies="libeay32.lib libglog.lib libdb48d.lib libdb_stl48d.lib"
 				LinkIncremental="2"
-				AdditionalLibraryDirectories="&quot;C:\Program Files\Common Files\glog\Debug&quot;;&quot;C:\Program Files\Common Files\Boost\lib&quot;;&quot;C:\Program Files\Common Files\openssl\out32dll&quot;"
+				AdditionalLibraryDirectories="&quot;C:\Program Files\Common Files\glog\Debug&quot;;&quot;C:\Program Files\Common Files\Boost\lib&quot;;&quot;C:\Program Files\Common Files\openssl\out32dll&quot;;&quot;C:\Program Files\Common Files\berkeleydb\build_windows\Win32\Debug&quot;"
 				GenerateDebugInformation="true"
 				SubSystem="1"
 				TargetMachine="1"
@@ -201,6 +201,10 @@
 				</FileConfiguration>
 			</File>
 			<File
+				RelativePath="..\core.cpp"
+				>
+			</File>
+			<File
 				RelativePath="..\hunk.cpp"
 				>
 				<FileConfiguration
@@ -219,6 +223,10 @@
 						Name="VCCLCompilerTool"
 					/>
 				</FileConfiguration>
+			</File>
+			<File
+				RelativePath="..\known_peers.cpp"
+				>
 			</File>
 			<File
 				RelativePath="..\packet.cpp"
@@ -309,6 +317,10 @@
 				</File>
 				<File
 					RelativePath=".\standalone.test.cpp"
+					>
+				</File>
+				<File
+					RelativePath=".\trafic_stats.test.cpp"
 					>
 				</File>
 			</Filter>

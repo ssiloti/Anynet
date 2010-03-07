@@ -35,7 +35,7 @@
 #include "node.hpp"
 
 non_authoritative::non_authoritative(local_node& node)
-	: user_content(node, protocol_id), stored_hunks_(node.config().content_store_path(), protocol_id, node)
+	: user_content(node, protocol_id), stored_hunks_(node.config().content_store_path() + "/non_authoritative", protocol_id, node)
 {
 }
 

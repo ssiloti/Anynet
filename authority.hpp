@@ -83,6 +83,7 @@ public:
 	authority() : key_(NULL) {}
 	authority(const_buffer key);
 	authority(const author& auth) : key_(RSAPublicKey_dup(auth.key_)) {}
+	~authority();
 
 	bool verify(const_buffer message, const_buffer signature) const;
 

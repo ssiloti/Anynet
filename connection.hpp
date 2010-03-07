@@ -200,10 +200,11 @@ public:
 	{
 		ptr_t con(new connection(node, ib));
 		con->starting_connection();
-		incoming.async_accept( con->link_.socket, boost::bind(&connection::connection_accepted,
-		                                                      con,
-		                                                      placeholders::error,
-		                                                      boost::ref(incoming)) );
+		incoming.async_accept( con->link_.socket.lowest_layer(),
+		                       boost::bind(&connection::connection_accepted,
+		                                   con,
+		                                   placeholders::error,
+		                                   boost::ref(incoming)) );
 	}
 
 private:
@@ -300,6 +301,7 @@ private:
 	//void packet_sent(const boost::system::error_code& error, std::size_t bytes_transferred);
 
 	void connection_accepted(const boost::system::error_code& error, ip::tcp::acceptor& incoming);
+	void ssl_handshake(boost::asio::ssl::stream_base::handshake_type type, const boost::system::error_code& error);
 	void write_handshake(const boost::system::error_code& error);
 	void read_handshake(const boost::system::error_code& error, std::size_t bytes_transferred);
 	void handshake_received(const boost::system::error_code& error, std::size_t bytes_transferred);
@@ -308,7 +310,7 @@ private:
 	template <typename Adr>
 	const_buffer do_generate_handshake();
 	template <typename Adr>
-	unsigned do_parse_handshake();
+	bool do_parse_handshake();
 
 	local_node& node_;
 	net_link link_;

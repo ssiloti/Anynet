@@ -36,6 +36,7 @@
 
 #include <glog/logging.h>
 
+#include "known_peers.hpp"
 #include "connection.hpp"
 #include "protocol.hpp"
 #include "config.hpp"
@@ -168,7 +169,12 @@ public:
 	hunk_descriptor_t load_existing_hunk(protocol_t pid, network_key id, std::size_t size);
 	hunk_descriptor_t not_a_hunk() { return stored_hunks_.end(); }
 
+	// credit accounting
+	void sent_content(const network_key& id, std::size_t bytes) { traffic_stats_.sent_content(id, bytes); }
+
 	rolling_stats sources_per_hunk;
+
+	boost::asio::ssl::context context;
 
 private:
 	void bootstrap();
@@ -178,7 +184,7 @@ private:
 	void update_threshold_stats();
 
 	bool is_user_content(protocol_t p)    const { return p < 32; }
-	bool is_network_control(protocol_t p) const { return p >= 48; }
+	bool is_network_control(protocol_t p) const { return p >= 32 && p != 63; }
 	network_protocol::ptr_t validate_protocol(protocol_t protocol);
 
 	bool try_prune_cache(std::size_t size, int closer_peers, boost::posix_time::time_duration age);
@@ -192,6 +198,8 @@ private:
 	// strict successor doesn't take ancillary factors into account, it will always return the closest node in terms of key distance
 	template <network_key dist_fn(const network_key& src, const network_key& dest)>
 	std::vector<connection::ptr_t>::iterator get_strict_sucessor(const network_key& outer_id, const network_key& inner_id, const network_key& key, std::size_t content_size = 0);
+
+	void generate_cert();
 
 	client_config&           config_;
 	ip::tcp::acceptor        acceptor_;
@@ -213,6 +221,10 @@ private:
 	// cache policy
 	stored_hunks_t stored_hunks_;
 	boost::uint64_t stored_size_;
+
+	RSA* client_key_;
+
+	known_peers traffic_stats_;
 };
 
 inline bool operator==(local_node::oob_peer::ptr_t l, connection::ptr_t r) { return r == l->con; }

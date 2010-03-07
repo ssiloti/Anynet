@@ -36,7 +36,6 @@
 
 #include <glog/logging.h>
 
-#include "link.hpp"
 #include "field_utils.hpp"
 #include "core.hpp"
 #include <openssl/sha.h>
@@ -46,6 +45,8 @@
 #include <cstring>
 #include <sstream>
 #include <iomanip>
+
+using boost::asio::const_buffer;
 
 class network_key : boost::totally_ordered<network_key, boost::additive<network_key, boost::additive<network_key, unsigned int> > >
 {

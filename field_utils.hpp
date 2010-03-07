@@ -35,6 +35,34 @@
 #define FIELD_UTILS_HPP
 
 #include <boost/cstdint.hpp>
+#include <boost/integer.hpp>
+
+template <int Bits>
+class big_endian
+{
+	static const int bytes = Bits / 8;
+	typedef typename boost::uint_t<Bits>::fast native_t;
+
+public:
+	big_endian(native_t value)
+	{
+		for (int l = 0; l < bytes; ++l)
+			b_[l] = i >> ((bytes - 1 - l) * 8) & 0xFF;
+	}
+
+	operator native_t()
+	{
+		native_t value = 0;
+
+		for (int l = 0; l < bytes; ++l)
+			value |= b[l] << (bytes - 1 - l);
+
+		return value;
+	}
+
+private:
+	boost::uint8_t b_[bytes];
+};
 
 inline boost::uint16_t u16(const boost::uint8_t b[2]) { return b[0] << 8 | b[1]; }
 
@@ -43,6 +71,12 @@ inline boost::uint32_t u32(const boost::uint8_t b[4]) { return b[0] << 24 | b[1]
 inline void u16(boost::uint8_t b[2], boost::uint16_t i) { b[0] = i >> 8; b[1] = i & 0xFF; }
 
 inline void u32(boost::uint8_t b[4], boost::uint32_t i) { b[0] = i >> 24; b[1] = i >> 16 & 0xFF; b[2] = i >> 8 & 0xFF; b[3] = i & 0xFF; }
+
+inline void u64(boost::uint8_t b[8], boost::uint64_t i)
+{
+	for (int l = 0; l < 8; ++l)
+		b[l] = i >> (7 - l) & 0xFF;
+}
 
 template <int Bn, typename I>
 bool bit(I b) { return (b & 1 << Bn) != 0; }

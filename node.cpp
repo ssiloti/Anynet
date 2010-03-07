@@ -37,11 +37,14 @@
 #include "peer_cache.hpp"
 #include "packet.hpp"
 #include "connection.hpp"
+#include <openssl/pem.h>
+#include <openssl/x509v3.h>
 #include <boost/bind/protect.hpp>
 #include <boost/accumulators/accumulators.hpp>
 #include <boost/accumulators/statistics/mean.hpp>
 #include <boost/accumulators/statistics/variance.hpp>
 #include <limits>
+#include <cstdio>
 
 class user_content;
 
@@ -49,11 +52,35 @@ class user_content;
 #include "simulator.hpp"
 #endif
 
+int verify_callback(int ok, ::X509_STORE_CTX *store)
+{
+	if (!ok) {
+		if (::X509_STORE_CTX_get_error(store) == X509_V_ERR_DEPTH_ZERO_SELF_SIGNED_CERT)
+			ok = 1;
+	}
+
+	return ok;
+}
+
 local_node::local_node(boost::asio::io_service& io_service, client_config& config)
 	: config_(config), acceptor_(io_service, ip::tcp::endpoint(ip::address::from_string(config.listen_ip()), config.listen_port())),
-	  public_endpoint_(acceptor_.local_endpoint()), created_(boost::posix_time::second_clock::universal_time()), stored_size_(0)
+	  public_endpoint_(acceptor_.local_endpoint()), created_(boost::posix_time::second_clock::universal_time()), stored_size_(0),
+	  traffic_stats_("./" + config.content_store_path() + "/traffic.db"), context(io_service, boost::asio::ssl::context::tlsv1)
 	  
 {
+	std::string client_id_path(config.content_store_path() + "/client_id.pem");
+
+	if (!boost::filesystem::exists(client_id_path))
+		generate_cert();
+
+	context.set_options(boost::asio::ssl::context::single_dh_use);
+//	context_.set_verify_mode(boost::asio::ssl::context::verify_peer |
+//	                         boost::asio::ssl::context::verify_fail_if_no_peer_cert);
+	context.use_certificate_chain_file(client_id_path.c_str());
+	context.use_private_key_file(client_id_path.c_str(), boost::asio::ssl::context::pem);
+//	link_.context.use_tmp_dh_file("dh512.pem");
+	::SSL_CTX_set_verify(context.impl(), SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT, verify_callback);
+
 	connection::accept(*this, acceptor_);
 	bootstrap();
 }
@@ -437,6 +464,9 @@ void local_node::packet_received(connection::ptr_t con, packet::ptr_t pkt)
 		return;
 	}
 
+	if (pkt->content_status() == packet::content_attached)
+		traffic_stats_.received_content(con->remote_id(), pkt->payload()->content_size());
+
 	network_protocol& protocol = get_protocol(pkt);
 
 	//con->receive_packet(packet::ptr_t(new packet()), boost::protect(boost::bind(&local_node::incoming_packet, this, con, _1, _2)));
@@ -561,6 +591,8 @@ void local_node::incoming_fragment(connection::ptr_t con, frame_fragment::ptr_t 
 
 void local_node::fragment_received(connection::ptr_t con, frame_fragment::ptr_t frag)
 {
+	if (frag->status() == frame_fragment::status_attached)
+		traffic_stats_.received_content(con->remote_id(), frag->size());
 	boost::dynamic_pointer_cast<user_content>(validate_protocol(frag->protocol()))->snoop_fragment(con->remote_endpoint(), frag);
 }
 
@@ -810,12 +842,12 @@ bool local_node::try_prune_cache(std::size_t size, int closer_peers, boost::posi
 				for (std::vector<stored_hunks_t::iterator>::iterator pruned = to_be_pruned.begin(); pruned != to_be_pruned.end(); ++pruned) {
 					get_protocol((*pruned)->protocol).prune_hunk((*pruned)->id);
 					stored_hunks_.erase(*pruned);
+					stored_size_ -= (*pruned)->size;
 				}
 
 				return true;
 			}
 			needed_bytes_ -= hunk->size;
-			stored_size_ -= hunk->size;
 		}
 
 		// if we get here it means we failed to free up enough space :(
@@ -830,4 +862,34 @@ hunk_descriptor_t local_node::load_existing_hunk(protocol_t pid, network_key id,
 	stored_hunks_.push_back(stored_hunk(pid, id, size, closer_peers(id), false));
 	stored_size_ += size;
 	return --stored_hunks_.end();
+}
+
+void local_node::generate_cert()
+{
+	::EVP_PKEY* pk = ::EVP_PKEY_new();
+	::X509* x = ::X509_new();
+	client_key_ = ::RSA_generate_key(2048, RSA_F4, NULL, NULL);
+
+	::EVP_PKEY_assign_RSA(pk, client_key_);
+
+	::X509_set_version(x, 2);
+	::ASN1_INTEGER_set(X509_get_serialNumber(x), 1);
+	::ASN1_UTCTIME_set_string(X509_get_notBefore(x), "000101000000Z");
+	::ASN1_GENERALIZEDTIME_set_string(X509_get_notAfter(x), "99991231235959Z");
+	::X509_set_pubkey(x, pk);
+
+	::X509_NAME* name = ::X509_get_subject_name(x);
+
+	::X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC, (const unsigned char*)"anynet/0", -1, -1, 0);
+	::X509_set_issuer_name(x,name);
+
+	::X509_sign(x,pk,::EVP_md5());
+
+	std::FILE* fp = std::fopen((config().content_store_path() + "/client_id.pem").c_str(), "w");
+	::PEM_write_X509(fp, x);
+	::PEM_write_PrivateKey(fp, pk, NULL, NULL, 0, NULL, NULL);
+	std::fclose(fp);
+
+	::X509_free(x);
+	::EVP_PKEY_free(pk);
 }

@@ -38,6 +38,7 @@
 
 #include <glog/logging.h>
 
+#include <boost/asio/ssl.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/placeholders.hpp>
 #include <boost/asio/buffer.hpp>
@@ -80,8 +81,11 @@ public:
 	static const int protocol_version = 0;
 
 	typedef std::vector<boost::uint8_t> sr_buffer_t;
+	typedef boost::asio::ssl::stream<ip::tcp::socket> socket_t;
 
-	net_link(boost::asio::io_service& io_service) : socket(io_service), valid_receive_bytes_(0), valid_send_bytes_(0), send_buffer_(sr_buffer_size) {}
+	net_link(boost::asio::io_service& io_service, boost::asio::ssl::context& ctx)
+		: socket(io_service, ctx), valid_receive_bytes_(0), valid_send_bytes_(0), send_buffer_(sr_buffer_size)
+	{}
 
 	mutable_buffer receive_buffer(std::size_t size = 0)
 	{
@@ -149,7 +153,7 @@ public:
 		valid_send_bytes_ = 0;
 	}
 
-	ip::tcp::socket socket;
+	socket_t socket;
 
 private:
 	std::size_t valid_receive_bytes_;

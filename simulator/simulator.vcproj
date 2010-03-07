@@ -41,8 +41,8 @@
 			<Tool
 				Name="VCCLCompilerTool"
 				Optimization="0"
-				AdditionalIncludeDirectories=".;..;&quot;C:\Program Files\Common Files\Boost&quot;;&quot;C:\Program Files\Common Files\openssl\inc32&quot;;&quot;C:\Program Files\Common Files\glog\src\windows&quot;"
-				PreprocessorDefinitions="NOMINMAX;SIMULATION"
+				AdditionalIncludeDirectories=".;..;&quot;C:\Program Files\Common Files\Boost&quot;;&quot;C:\Program Files\Common Files\openssl\inc32&quot;;&quot;C:\Program Files\Common Files\glog\src\windows&quot;;&quot;C:\Program Files\Common Files\berkeleydb\dbinc&quot;;&quot;C:\Program Files\Common Files\berkeleydb\stl&quot;;&quot;C:\Program Files\Common Files\berkeleydb\build_windows&quot;"
+				PreprocessorDefinitions="NOMINMAX;SIMULATION;_CRT_SECURE_NO_WARNINGS"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
 				RuntimeLibrary="3"
@@ -62,9 +62,9 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalDependencies="libeay32.lib libglog.lib"
+				AdditionalDependencies="libeay32.lib ssleay32.lib libglog.lib libdb48d.lib"
 				LinkIncremental="2"
-				AdditionalLibraryDirectories="&quot;C:\Program Files\Common Files\Boost\lib&quot;;&quot;C:\Program Files\Common Files\openssl\out32dll&quot;;&quot;C:\Program Files\Common Files\glog\Debug&quot;"
+				AdditionalLibraryDirectories="&quot;C:\Program Files\Common Files\Boost\lib&quot;;&quot;C:\Program Files\Common Files\openssl\out32dll.dbg&quot;;&quot;C:\Program Files\Common Files\glog\Debug&quot;;&quot;C:\Program Files\Common Files\berkeleydb\build_windows\Win32\Debug&quot;"
 				GenerateDebugInformation="true"
 				SubSystem="1"
 				TargetMachine="1"
@@ -118,8 +118,8 @@
 				Name="VCCLCompilerTool"
 				Optimization="2"
 				EnableIntrinsicFunctions="true"
-				AdditionalIncludeDirectories=".;..;&quot;C:\Program Files\Common Files\Boost&quot;;&quot;C:\Program Files\Common Files\openssl\inc32&quot;;&quot;C:\Program Files\Common Files\glog\src\windows&quot;"
-				PreprocessorDefinitions="NOMINMAX;SIMULATION"
+				AdditionalIncludeDirectories=".;..;&quot;C:\Program Files\Common Files\Boost&quot;;&quot;C:\Program Files\Common Files\openssl\inc32&quot;;&quot;C:\Program Files\Common Files\glog\src\windows&quot;;&quot;C:\Program Files\Common Files\berkeleydb\dbinc&quot;;&quot;C:\Program Files\Common Files\berkeleydb\stl&quot;;&quot;C:\Program Files\Common Files\berkeleydb\build_windows&quot;"
+				PreprocessorDefinitions="NOMINMAX;SIMULATION;_CRT_SECURE_NO_WARNINGS"
 				RuntimeLibrary="2"
 				EnableFunctionLevelLinking="true"
 				UsePrecompiledHeader="0"
@@ -138,9 +138,9 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalDependencies="libeay32.lib libglog.lib"
+				AdditionalDependencies="libeay32.lib ssleay32.lib libglog.lib libdb48.lib"
 				LinkIncremental="1"
-				AdditionalLibraryDirectories="&quot;C:\Program Files\Common Files\Boost\lib&quot;;&quot;C:\Program Files\Common Files\openssl\out32dll&quot;;&quot;C:\Program Files\Common Files\glog\Release&quot;"
+				AdditionalLibraryDirectories="&quot;C:\Program Files\Common Files\Boost\lib&quot;;&quot;C:\Program Files\Common Files\openssl\out32dll&quot;;&quot;C:\Program Files\Common Files\glog\Release&quot;;&quot;C:\Program Files\Common Files\berkeleydb\build_windows\Win32\Release&quot;"
 				GenerateDebugInformation="true"
 				SubSystem="1"
 				OptimizeReferences="2"
@@ -200,6 +200,10 @@
 			</File>
 			<File
 				RelativePath="..\hunk.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\known_peers.cpp"
 				>
 			</File>
 			<File
@@ -274,6 +278,10 @@
 			</File>
 			<File
 				RelativePath="..\key.hpp"
+				>
+			</File>
+			<File
+				RelativePath="..\known_peers.hpp"
 				>
 			</File>
 			<File

@@ -41,6 +41,11 @@ authority::authority(const_buffer key) : key_(NULL)
 	key_ = d2i_RSAPublicKey(&key_, &buf_ptr, buffer_size(key));
 }
 
+authority::~authority()
+{
+	RSA_free(key_);
+}
+
 bool authority::verify(const_buffer message, const_buffer signature) const
 {
 	return RSA_verify(NID_sha1,

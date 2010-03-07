@@ -32,6 +32,7 @@
 // Contact:  Steven Siloti <ssiloti@gmail.com>
 
 #include "config.hpp"
+#include <boost/filesystem.hpp>
 #include <boost/lexical_cast.hpp>
 #include <fstream>
 #include <sstream>
@@ -39,5 +40,6 @@
 client_config::client_config(int id)
 : content_store_path_(boost::lexical_cast<std::string>(id)), port_(11000 + id), listen_ip_("127.0.0.1")
 {
-
+	boost::filesystem::path p(content_store_path_);
+	boost::filesystem::create_directories(p);
 }

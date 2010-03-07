@@ -141,7 +141,7 @@ private:
 	                     const boost::system::error_code& error,
 	                     std::size_t bytes_transferred)
 	{
-		if (error || !link.socket.is_open()) {
+		if (error || !link.socket.lowest_layer().is_open()) {
 			DLOG(INFO) << "Error receiving packet header" << error;
 			ptr_t p;
 			handler(p, bytes_transferred);

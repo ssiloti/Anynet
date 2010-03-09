@@ -183,8 +183,8 @@ private:
 	void disconnect_peer(connection::ptr_t con);
 	void update_threshold_stats();
 
-	bool is_user_content(protocol_t p)    const { return p < 32; }
-	bool is_network_control(protocol_t p) const { return p >= 32 && p != 63; }
+	bool is_user_content(protocol_t p)    const { return (p >> 6) == 0; }
+	bool is_network_control(protocol_t p) const { return (p >> 6) == 1; }
 	network_protocol::ptr_t validate_protocol(protocol_t protocol);
 
 	bool try_prune_cache(std::size_t size, int closer_peers, boost::posix_time::time_duration age);

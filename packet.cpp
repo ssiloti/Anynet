@@ -51,7 +51,8 @@ struct packed_header
 {
 	boost::uint8_t frame_type;
 	boost::uint8_t protocol;
-	boost::uint8_t rsvd[2];
+	boost::uint8_t rsvd;
+	boost::uint8_t status;
 	boost::uint8_t destination[network_key::packed_size];
 	boost::uint8_t payload_size[4];
 };
@@ -65,8 +66,8 @@ std::size_t packet::parse_header(const_buffer buf)
 {
 	const packed_header* header = buffer_cast<const packed_header*>(buf);
 
-	content_status(content_status_t(header->protocol >> 6));
-	protocol(header->protocol & 0x3F);
+	content_status(content_status_t(header->status & 0x03));
+	protocol(header->protocol);
 	destination(network_key(header->destination));
 	return u32(header->payload_size);
 }
@@ -77,7 +78,7 @@ std::size_t packet::serialize_header(mutable_buffer buf)
 	
 	header->frame_type = connection::frame_network_packet;
 	header->protocol = protocol();
-	header->protocol |= content_status() << 6;
+	header->status = content_status();
 	destination().encode(header->destination);
 
 	return sizeof(packed_header);

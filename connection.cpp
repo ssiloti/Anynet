@@ -270,13 +270,7 @@ void connection::handshake_received(const boost::system::error_code& error, std:
 		return;
 	}
 
-#ifdef SIMULATION
-	boost::uint8_t port[2];
-	u16(port, incoming_port_);
-	remote_identity_ = network_key(const_buffer(port, 2));
-#else
-	remote_identity_ = network_key(link_.socket.remote_endpoint().address());
-#endif
+	remote_identity_ = network_key(::SSL_get_peer_certificate(link_.socket.impl()->ssl));
 
 	if (supported_protocols_.size() > link_.valid_received_bytes())
 		boost::asio::async_read(link_.socket,
@@ -308,6 +302,7 @@ void connection::complete_connection(const boost::system::error_code& error, std
 
 	lifecycle_ = connected;
 	established_ = boost::posix_time::second_clock::universal_time();
+	DLOG(INFO) << "Connected with cipher: " << ::SSL_CIPHER_get_name(::SSL_get_current_cipher(link_.socket.impl()->ssl)); //<< " and compression: " << ::SSL_COMP_get_name(::SSL_get_current_compression(link_.socket.impl()->ssl));
 	node_.register_connection(shared_from_this());
 
 	if (accepts_ib_traffic())

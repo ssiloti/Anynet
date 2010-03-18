@@ -38,6 +38,7 @@
 
 #include "field_utils.hpp"
 #include "core.hpp"
+#include <openssl/x509.h>
 #include <openssl/sha.h>
 #include <boost/asio/buffer.hpp>
 #include <boost/operators.hpp>
@@ -74,6 +75,14 @@ public:
 			u16(&id[bytes.size()], ep.port());
 			SHA256(id, bytes.size() + 2, reinterpret_cast<unsigned char*>(digits_));
 		}
+
+		for (int i=0;i<digit_elements;++i)
+			digits_[i] = u32(reinterpret_cast<unsigned char*>(&digits_[i]));
+	}
+
+	explicit network_key(::X509* cert)
+	{
+		::X509_pubkey_digest(cert, ::EVP_sha256(), reinterpret_cast<unsigned char*>(digits_), NULL);
 
 		for (int i=0;i<digit_elements;++i)
 			digits_[i] = u32(reinterpret_cast<unsigned char*>(&digits_[i]));

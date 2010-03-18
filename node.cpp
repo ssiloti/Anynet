@@ -78,7 +78,7 @@ local_node::local_node(boost::asio::io_service& io_service, client_config& confi
 //	                         boost::asio::ssl::context::verify_fail_if_no_peer_cert);
 	context.use_certificate_chain_file(client_id_path.c_str());
 	context.use_private_key_file(client_id_path.c_str(), boost::asio::ssl::context::pem);
-//	link_.context.use_tmp_dh_file("dh512.pem");
+//	context.use_tmp_dh_file("dh512.pem");
 	::SSL_CTX_set_verify(context.impl(), SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT, verify_callback);
 
 	connection::accept(*this, acceptor_);
@@ -598,21 +598,17 @@ void local_node::fragment_received(connection::ptr_t con, frame_fragment::ptr_t 
 
 void local_node::recompute_identity()
 {
+	std::FILE* fp = std::fopen((config().content_store_path() + "/client_id.pem").c_str(), "r");
+	::X509* cert = NULL;
+	::PEM_read_X509(fp, &cert, NULL, NULL);
+	std::fclose(fp);
+
+	identity_ = network_key(cert);
+
+	::X509_free(cert);
+
 #ifdef SIMULATION
 	public_endpoint_.address(ip::address::from_string("127.0.0.1"));
-	boost::uint8_t port[2];
-	u16(port, config_.listen_port());
-	identity_ = network_key(const_buffer(port, 2));
-#else
-	int max_count = 0;
-	for (std::multiset<ip::address>::iterator it = reported_addresses_.begin(); it != reported_addresses_.end(); ++it) {
-		int count = reported_addresses_.count(*it);
-		if (count > max_count) {
-			public_endpoint_.address(*it);
-			max_count = count;
-		}
-	}
-	identity_ = network_key(public_endpoint().address());
 #endif
 }
 

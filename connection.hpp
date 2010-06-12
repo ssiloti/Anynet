@@ -53,7 +53,7 @@ class local_node;
 class connection : public boost::enable_shared_from_this<connection>, boost::noncopyable
 {
 	const static int min_oob_threshold = 8000;
-	const static boost::posix_time::time_duration target_latency;
+	const static boost::posix_time::millisec target_latency;
 public:
 	typedef boost::shared_ptr<connection> ptr_t;
 	typedef boost::weak_ptr<connection> weak_ptr_t;
@@ -63,7 +63,7 @@ public:
 		oob = 0,  // out-of-band (does not send or receive in-band traffic)
 		gw,       // gateway (sends but does not receive in-band traffic)
 		rsvd,     // reserved
-		ib        // in-band (sends and receives in-band traffic)
+		ib,       // in-band (sends and receives in-band traffic)
 	};
 
 	enum lifecycle
@@ -71,7 +71,7 @@ public:
 		connecting,
 		connected,
 		disconnecting,
-		cleanup
+		cleanup,
 	};
 
 	enum frame_types
@@ -80,7 +80,7 @@ public:
 		frame_fragment,
 		frame_oob_threshold_update,
 		frame_successor_request,
-		frame_successor
+		frame_successor,
 	};
 
 	enum frame_bits
@@ -97,23 +97,17 @@ public:
 	bool accepts_ib_traffic() const { return routing_type_ & 0x01; }
 	bool is_connected() const { return lifecycle_ == connected; }
 	boost::posix_time::time_duration age() { return boost::posix_time::second_clock::universal_time() - established_; }
-	bool is_transfer_outstanding() const { return transfer_outstanding_ || send_queue_.size() > 0; }
+	bool is_transfer_outstanding() const { return transfer_outstanding_ || outstanding_non_packet_frames_ || !packet_queue_.empty() || !fragment_queue_.empty(); }
 	bool supports_protocol(protocol_t p) { return std::find(supported_protocols_.begin(), supported_protocols_.end(), p) != supported_protocols_.end(); }
 
 	void send_reverse_successor()
 	{
-		int previously_outstanding = outstanding_non_packet_frames_;
-		outstanding_non_packet_frames_ |= frame_bit_successor;
-		if (!(previously_outstanding || send_queue_.size()))
-			send_next_frame();
+		send_next_frame(frame_bit_successor);
 	}
 
 	void request_reverse_successor()
 	{
-		int previously_outstanding = outstanding_non_packet_frames_;
-		outstanding_non_packet_frames_ |= frame_bit_successor_request;
-		if (!(previously_outstanding || send_queue_.size()))
-			send_next_frame();
+		send_next_frame(frame_bit_successor_request);
 	}
 
 	void disconnect();
@@ -127,11 +121,11 @@ public:
 		if (payload_size > link_.valid_received_bytes()) {
 			boost::asio::async_read(link_.socket,
 			                        mutable_buffers_1(link_.receive_buffer(payload_size)),
-									boost::asio::transfer_at_least(payload_size - link_.valid_received_bytes()),
-									boost::bind(&connection::payload_received<Handler>,
+			                        boost::asio::transfer_at_least(payload_size - link_.valid_received_bytes()),
+			                        boost::bind(&connection::payload_received<Handler>,
 			                                    shared_from_this(),
 			                                    handler,
-												payload_size,
+			                                    payload_size,
 			                                    placeholders::error,
 			                                    placeholders::bytes_transferred));
 			link_.consume_receive_buffer(link_.valid_received_bytes());
@@ -163,7 +157,7 @@ public:
 			bufs.erase(bufs.begin(), begin);
 			boost::asio::async_read(link_.socket,
 			                        bufs,
-									boost::bind(&connection::payload_received<Handler>,
+			                        boost::bind(&connection::payload_received<Handler>,
 			                                    shared_from_this(),
 			                                    handler,
 			                                    placeholders::error,
@@ -241,7 +235,6 @@ private:
 
 	const_buffer generate_handshake();
 	bool parse_handshake();
-	void content_sent(const boost::system::error_code& error, std::size_t bytes_transfered);
 	void redispatch_send_queue();
 
 	void frame_head_received(const boost::system::error_code& error, std::size_t bytes_transfered);
@@ -254,7 +247,6 @@ private:
 	{
 		if (!error) {
 			handler();
-			update_oob_threshold();
 			receive_next_frame();
 		}
 		else {
@@ -269,7 +261,6 @@ private:
 			link_.received(bytes_transfered);
 			handler(buffer(link_.received_buffer(), payload_size));
 			link_.consume_receive_buffer(payload_size);
-			update_oob_threshold();
 			receive_next_frame();
 		}
 		else {
@@ -279,24 +270,25 @@ private:
 
 	std::size_t oob_threshold_size();
 	void parse_oob_threshold();
+	void update_local_threshold(boost::posix_time::time_duration duration, std::size_t bytes_sent);
+
+	void update_oob_threshold()
+	{
+		oob_threshold_ = std::min(remote_oob_threshold_, local_oob_threshold_);
+		if (oob_threshold_ < min_oob_threshold)
+			oob_threshold_ = min_oob_threshold;
+		send_next_frame(frame_bit_oob_threshold_update);
+	//	oob_threshold_ = 0;
+	}
 
 	std::size_t successor_size();
 	void parse_successor();
 
+	void send_next_frame(int send_non_packet_frame);
 	void send_next_frame();
+	void packet_sent(const boost::system::error_code& error, std::size_t bytes_transfered);
+	void fragment_sent(const boost::system::error_code& error, std::size_t bytes_transfered);
 	void frame_sent(frame_bits frame_bit, const boost::system::error_code& error, std::size_t bytes_transfered);
-
-	void update_oob_threshold()
-	{
-		int previously_outstanding = outstanding_non_packet_frames_;
-		outstanding_non_packet_frames_ |= frame_bit_oob_threshold_update;
-		oob_threshold_ = std::min(remote_oob_threshold_, local_oob_threshold_);
-		if (oob_threshold_ < min_oob_threshold)
-			oob_threshold_ = min_oob_threshold;
-		if (!(previously_outstanding || send_queue_.size()))
-			send_next_frame();
-	//	oob_threshold_ = 0;
-	}
 
 	//void packet_sent(const boost::system::error_code& error, std::size_t bytes_transferred);
 
@@ -314,21 +306,30 @@ private:
 
 	local_node& node_;
 	net_link link_;
+
 	boost::uint32_t oob_threshold_;
 	boost::uint32_t remote_oob_threshold_;
 	boost::uint32_t local_oob_threshold_;
-	network_key remote_identity_;
-	ip::address reported_peer_address_;
-	std::deque<queued_packet> send_queue_;
-	std::deque<pending_ack> ack_queue_;
+
 	boost::uint16_t incoming_port_;
 	boost::posix_time::ptime established_;
+
 	routing_type routing_type_;
+
+	network_key remote_identity_;
+	ip::address reported_peer_address_;
 	std::vector<protocol_t> supported_protocols_;
-	lifecycle lifecycle_;
+
+	std::deque<queued_packet> packet_queue_;
+	std::deque<frame_fragment::ptr_t> fragment_queue_;
+	std::deque<pending_ack> ack_queue_;
+	int outstanding_non_packet_frames_;
+	boost::posix_time::ptime fragment_sent_;
+
 	packet::ptr_t pending_recv_;
 	bool transfer_outstanding_;
-	int outstanding_non_packet_frames_;
+
+	lifecycle lifecycle_;
 };
 
 #endif

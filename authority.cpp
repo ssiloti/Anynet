@@ -34,6 +34,9 @@
 #include "authority.hpp"
 #include <openssl/sha.h>
 #include <openssl/objects.h>
+#include <openssl/pem.h>
+#include <openssl/x509v3.h>
+#include <boost/filesystem/operations.hpp>
 
 authority::authority(const_buffer key) : key_(NULL)
 {
@@ -51,14 +54,47 @@ bool authority::verify(const_buffer message, const_buffer signature) const
 	return RSA_verify(NID_sha1,
 	                  buffer_cast<const unsigned char*>(message),
 	                  buffer_size(message),
-					  // const_cast to work around openssl API snafu
-	                  const_cast<unsigned char*>(buffer_cast<const unsigned char*>(signature)),
+	                  buffer_cast<const unsigned char*>(signature),
 	                  buffer_size(signature),
-					  key_);
+	                  key_);
 }
 
-author::author(unsigned int bits) : key_(RSA_generate_key(bits, RSA_3, NULL, NULL))
+author::author(const std::string& cert_file)
+	: key_(NULL)
 {
+	if (!boost::filesystem::exists(cert_file)) {
+		::EVP_PKEY* pk = ::EVP_PKEY_new();
+		::X509* x = ::X509_new();
+		key_ = ::RSA_generate_key(2048, RSA_F4, NULL, NULL);
+
+		::EVP_PKEY_assign_RSA(pk, key_);
+
+		::X509_set_version(x, 2);
+		::ASN1_INTEGER_set(X509_get_serialNumber(x), 1);
+		::ASN1_UTCTIME_set_string(X509_get_notBefore(x), "000101000000Z");
+		::ASN1_GENERALIZEDTIME_set_string(X509_get_notAfter(x), "99991231235959Z");
+		::X509_set_pubkey(x, pk);
+
+		::X509_NAME* name = ::X509_get_subject_name(x);
+
+		::X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC, (const unsigned char*)"anynet/0", -1, -1, 0);
+		::X509_set_issuer_name(x,name);
+
+		::X509_sign(x,pk,::EVP_md5());
+
+		std::FILE* fp = std::fopen(cert_file.c_str(), "w");
+		::PEM_write_X509(fp, x);
+		::PEM_write_PrivateKey(fp, pk, NULL, NULL, 0, NULL, NULL);
+		std::fclose(fp);
+
+		::X509_free(x);
+		::EVP_PKEY_free(pk);
+	}
+	else {
+		std::FILE* fp = std::fopen(cert_file.c_str(), "r");
+		::PEM_read_RSAPrivateKey(fp, &key_, NULL, NULL);
+		std::fclose(fp);
+	}
 }
 
 mutable_buffer author::sign(const_buffer message, mutable_buffer signature) const
@@ -66,9 +102,9 @@ mutable_buffer author::sign(const_buffer message, mutable_buffer signature) cons
 	unsigned int sig_size;
 	RSA_sign(NID_sha1,
 	         buffer_cast<const unsigned char*>(message),
-			 buffer_size(message),
-			 buffer_cast<unsigned char*>(signature),
-			 &sig_size,
-			 key_);
+	         buffer_size(message),
+	         buffer_cast<unsigned char*>(signature),
+	         &sig_size,
+	         key_);
 	return buffer(signature, sig_size);
 }

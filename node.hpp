@@ -39,6 +39,7 @@
 #include "known_peers.hpp"
 #include "connection.hpp"
 #include "protocol.hpp"
+#include "authority.hpp"
 #include "config.hpp"
 #include <boost/asio/deadline_timer.hpp>
 #include <boost/date_time/posix_time/posix_time_types.hpp>
@@ -54,6 +55,8 @@ class local_node
 #ifdef SIMULATION
 	friend class traffic_generator;
 #endif
+
+	static const int replication_factor = 20;
 
 public:
 	struct oob_peer : boost::enable_shared_from_this<oob_peer>
@@ -137,10 +140,11 @@ public:
 	}
 
 	// successors
-	ip::tcp::endpoint sucessor_endpoint(const network_key& key);
-	ip::tcp::endpoint reverse_sucessor_endpoint(const network_key& key);
-	network_key self_reverse_sucessor();
-	int closer_peers(const network_key& key);
+	ip::tcp::endpoint successor_endpoint(const network_key& key);
+	ip::tcp::endpoint predecessor_endpoint(const network_key& key);
+	network_key self_predecessor() const;
+	network_key self_sucessor() const;
+	int closer_peers(const network_key& key) const;
 
 	// requests
 	void direct_request(ip::tcp::endpoint peer, frame_fragment::ptr_t frag);
@@ -171,6 +175,7 @@ public:
 
 	// credit accounting
 	void sent_content(const network_key& id, std::size_t bytes) { traffic_stats_.sent_content(id, bytes); }
+	const known_peers& get_known_peers() { return traffic_stats_; }
 
 	rolling_stats sources_per_hunk;
 
@@ -183,6 +188,9 @@ private:
 	void disconnect_peer(connection::ptr_t con);
 	void update_threshold_stats();
 
+	void add_peer(connection::ptr_t peer);
+	void remove_peer(connection::ptr_t peer);
+
 	bool is_user_content(protocol_t p)    const { return (p >> 6) == 0; }
 	bool is_network_control(protocol_t p) const { return (p >> 6) == 1; }
 	network_protocol::ptr_t validate_protocol(protocol_t protocol);
@@ -193,13 +201,26 @@ private:
 	std::vector<connection::ptr_t>::iterator sucessor(const network_key& key, const network_key& inner_id, std::size_t content_size = 0);
 
 	template <network_key dist_fn(const network_key& src, const network_key& dest)>
-	std::vector<connection::ptr_t>::iterator get_sucessor(const network_key& outer_id, const network_key& inner_id, const network_key& key, std::size_t content_size = 0);
+	std::vector<connection::ptr_t>::iterator best_peer(const network_key& outer_id,
+	                                                   const network_key& inner_id,
+	                                                   const network_key& key,
+	                                                   std::size_t content_size = 0);
 
-	// strict successor doesn't take ancillary factors into account, it will always return the closest node in terms of key distance
+	// doesn't take ancillary factors into account, it will always return the closest node in terms of key distance
 	template <network_key dist_fn(const network_key& src, const network_key& dest)>
-	std::vector<connection::ptr_t>::iterator get_strict_sucessor(const network_key& outer_id, const network_key& inner_id, const network_key& key, std::size_t content_size = 0);
+	std::vector<connection::ptr_t>::iterator closest_peer(const network_key& outer_id,
+	                                                      const network_key& inner_id,
+	                                                      const network_key& key,
+	                                                      std::size_t content_size = 0);
 
-	void generate_cert();
+	template <network_key dist_fn(const network_key& src, const network_key& dest)>
+	std::vector<connection::ptr_t>::const_iterator closest_peer(const network_key& outer_id,
+	                                                            const network_key& inner_id,
+	                                                            const network_key& key,
+	                                                            std::size_t content_size = 0) const;
+
+	template <network_key dist_fn(const network_key& src, const network_key& dest)>
+	int closer_peers(const network_key& src, const network_key& dest) const;
 
 	client_config&           config_;
 	ip::tcp::acceptor        acceptor_;
@@ -218,11 +239,13 @@ private:
 
 	std::size_t min_oob_threshold_, max_oob_threshold_, avg_oob_threshold_;
 
+	network_key replication_min_dist_;
+
 	// cache policy
 	stored_hunks_t stored_hunks_;
 	boost::uint64_t stored_size_;
 
-	RSA* client_key_;
+	author client_key_;
 
 	known_peers traffic_stats_;
 };

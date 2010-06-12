@@ -52,9 +52,11 @@ struct content_sources : boost::enable_shared_from_this<content_sources>
 
 	struct source
 	{
-		source() : stored(boost::posix_time::second_clock::universal_time()) {}
+		source() : stored(boost::posix_time::second_clock::universal_time()), active_request_count(0) {}
+		source(ip::tcp::endpoint ep) : ep(ep), stored(boost::posix_time::second_clock::universal_time()) {}
 		boost::posix_time::ptime stored;
-		boost::optional<network_key> id;
+		ip::tcp::endpoint ep;
+		unsigned int active_request_count;
 	};
 
 	struct ep_cmp
@@ -62,7 +64,7 @@ struct content_sources : boost::enable_shared_from_this<content_sources>
 		bool operator()(const ip::tcp::endpoint& l, const ip::tcp::endpoint& r) const { if (l.address() == r.address()) return l.port() < r.port(); return l.address() < r.address(); }
 	};
 
-	typedef std::map<ip::tcp::endpoint, source, ep_cmp> sources_t;
+	typedef std::map<network_key, source> sources_t;
 
 	content_sources(std::size_t s) : size(s), last_stat_source_count(0) {}
 
@@ -82,7 +84,7 @@ public:
 	content_request() : receiving_content_(false) {}
 
 	bool snoop_packet(local_node& node, packet::ptr_t pkt);
-	const_payload_buffer_ptr snoop_fragment(local_node& node, ip::tcp::endpoint src, frame_fragment::ptr_t frag);
+	const_payload_buffer_ptr snoop_fragment(local_node& node, const network_key& src, frame_fragment::ptr_t frag);
 	void add_handler(const keyed_handler_t& handler) { handlers_.push_back(handler); }
 	bool timeout(local_node& node, packet::ptr_t pkt);
 
@@ -94,7 +96,8 @@ private:
 	std::size_t content_size_;
 	std::vector<keyed_handler_t> handlers_;
 	boost::shared_ptr<content_sources> sources_;
-	ip::tcp::endpoint direct_request_pending_;
+	bool direct_request_pending_;
+	network_key direct_request_peer_;
 	boost::optional<framented_content> partial_content_;
 	network_key last_indirect_request_peer_;
 	bool receiving_content_;
@@ -125,7 +128,7 @@ public:
 
 	void content_fragment_received(connection::ptr_t con, frame_fragment::ptr_t frag);
 
-	void snoop_fragment(ip::tcp::endpoint src, frame_fragment::ptr_t frag);
+	void snoop_fragment(const network_key& src, frame_fragment::ptr_t frag);
 
 	virtual void shutdown() { network_protocol::shutdown(); vacume_sources_.cancel(); response_handlers_.clear(); }
 

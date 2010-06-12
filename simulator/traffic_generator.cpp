@@ -32,6 +32,7 @@
 // Contact:  Steven Siloti <ssiloti@gmail.com>
 
 #include "protocols/non_authoritative.hpp"
+#include "protocols/indirect_credit.hpp"
 #include "traffic_generator.hpp"
 #include "simulator.hpp"
 #include "peer_cache.hpp"
@@ -45,6 +46,7 @@ traffic_generator::traffic_generator(boost::asio::io_service& io_service, int id
 {
 	peer_cache.add_peer(ip::tcp::endpoint(ip::address::from_string("127.0.0.1"), config_.listen_port()));
 	non_authoritative::create(node_);
+	indirect_credit::create(node_);
 }
 
 void traffic_generator::tick(int time)

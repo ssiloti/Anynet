@@ -37,8 +37,6 @@
 #include "peer_cache.hpp"
 #include "packet.hpp"
 #include "connection.hpp"
-#include <openssl/pem.h>
-#include <openssl/x509v3.h>
 #include <boost/bind/protect.hpp>
 #include <boost/accumulators/accumulators.hpp>
 #include <boost/accumulators/statistics/mean.hpp>
@@ -65,13 +63,10 @@ int verify_callback(int ok, ::X509_STORE_CTX *store)
 local_node::local_node(boost::asio::io_service& io_service, client_config& config)
 	: config_(config), acceptor_(io_service, ip::tcp::endpoint(ip::address::from_string(config.listen_ip()), config.listen_port())),
 	  public_endpoint_(acceptor_.local_endpoint()), created_(boost::posix_time::second_clock::universal_time()), stored_size_(0),
-	  traffic_stats_("./" + config.content_store_path() + "/traffic.db"), context(io_service, boost::asio::ssl::context::tlsv1)
-	  
+	  traffic_stats_(io_service, "./" + config.content_store_path() + "/traffic.db", client_key_), context(io_service, boost::asio::ssl::context::tlsv1),
+	  client_key_(config.content_store_path() + "/client_id.pem")
 {
 	std::string client_id_path(config.content_store_path() + "/client_id.pem");
-
-	if (!boost::filesystem::exists(client_id_path))
-		generate_cert();
 
 	context.set_options(boost::asio::ssl::context::single_dh_use);
 //	context_.set_verify_mode(boost::asio::ssl::context::verify_peer |
@@ -103,25 +98,50 @@ local_node::~local_node()
 }
 
 template <network_key dist_fn(const network_key& src, const network_key& dest)>
-std::vector<connection::ptr_t>::iterator local_node::get_sucessor(const network_key& outer_id, const network_key& inner_id, const network_key& key, std::size_t content_size)
+std::vector<connection::ptr_t>::iterator local_node::best_peer(const network_key& outer_id,
+                                                               const network_key& inner_id,
+                                                               const network_key& key,
+                                                               std::size_t content_size)
 {
 	network_key max_dist = dist_fn(key, outer_id);
 	network_key min_dist = dist_fn(key, inner_id);
 
-	double best_score = 1.0;
+	double best_score = std::numeric_limits<double>::max();
 
-	std::vector<connection::ptr_t>::iterator best_peer(ib_peers_.end());
+	std::vector<connection::ptr_t>::iterator best(ib_peers_.end());
 
-	assert(max_dist >= min_dist);
+	//assert(max_dist >= min_dist);
 
 	long node_age = age().total_seconds();
+	double max_closer_peers = double(closer_peers<dist_fn>(key, outer_id));
+	std::size_t max_oob = 0;
+
+	// We need to determine the highest oob threshold for normalization purposes
+	for (std::vector<connection::ptr_t>::iterator it = ib_peers_.begin(); it != ib_peers_.end(); ++it)
+		if ((*it)->oob_threshold() > max_oob)
+			max_oob = (*it)->oob_threshold();
 
 	for (std::vector<connection::ptr_t>::iterator it = ib_peers_.begin(); it != ib_peers_.end(); ++it) {
 		network_key dist = dist_fn(key, (*it)->remote_id());
 		if (dist < max_dist && dist >= min_dist) {
-			double score = dist / max_dist;
-			assert(score < 1.0);
-			score *= 0.75;
+			double share = 1;
+
+
+			double score = double(closer_peers<dist_fn>(key, (*it)->remote_id())) / max_closer_peers;
+			assert(score <= 1.0);
+			score *= 1 - 1 / max_closer_peers;
+			share -= 1 - 1 / max_closer_peers;
+
+			double oob_threshold_term = double((*it)->oob_threshold()) / double(max_oob);
+			assert(oob_threshold_term <= 1.0);
+			if (content_size) {
+				score += oob_threshold_term * (share * std::min(1.0, double((*it)->oob_threshold()) / double(content_size)));
+				share -= share * std::min(1.0, double((*it)->oob_threshold()) / double(content_size));
+			}
+			else {
+				score += oob_threshold_term * (share * 0.5);
+				share -= share * 0.5;
+			}
 
 			double age_term;
 			if (node_age == 0)
@@ -129,30 +149,36 @@ std::vector<connection::ptr_t>::iterator local_node::get_sucessor(const network_
 			else
 				age_term = 1.0 - double((*it)->age().total_seconds()) / double(node_age);
 			assert(age_term <= 1.0);
-			score += ( age_term ) * 0.25;
+			score += ( age_term ) * share;
+			share -= share;
 
-			assert(score < 1.0);
+
+			assert(score <= 1.0);
 			// We want to favor peers who can take the content directly over those who cant, even if it results in picking a worse match in terms of score
-			if (( score < best_score && (best_peer == ib_peers_.end() || content_size <= (*it)->oob_threshold() || content_size > (*best_peer)->oob_threshold()) )
-				|| ( content_size > (*best_peer)->oob_threshold() && content_size <= (*it)->oob_threshold() )) {
+//			if (( score < best_score && (best == ib_peers_.end() || content_size <= (*it)->oob_threshold() || content_size > (*best)->oob_threshold()) )
+//			    || ( content_size > (*best)->oob_threshold() && content_size <= (*it)->oob_threshold() )) {
+			if (score < best_score) {
 				best_score = score;
-				best_peer = it;
+				best = it;
 			}
 		}
 	}
 
-	return best_peer;
+	return best;
 }
 
 template <network_key dist_fn(const network_key& src, const network_key& dest)>
-std::vector<connection::ptr_t>::iterator local_node::get_strict_sucessor(const network_key& outer_id, const network_key& inner_id, const network_key& key, std::size_t content_size)
+std::vector<connection::ptr_t>::iterator local_node::closest_peer(const network_key& outer_id,
+                                                                  const network_key& inner_id,
+                                                                  const network_key& key,
+                                                                  std::size_t content_size)
 {
 	network_key max_dist = dist_fn(key, outer_id);
 	network_key min_dist = dist_fn(key, inner_id);
 
 	network_key best_dist = max_dist;
 
-	std::vector<connection::ptr_t>::iterator best_peer(ib_peers_.end());
+	std::vector<connection::ptr_t>::iterator best(ib_peers_.end());
 
 	assert(max_dist >= min_dist);
 
@@ -160,16 +186,42 @@ std::vector<connection::ptr_t>::iterator local_node::get_strict_sucessor(const n
 		network_key dist = dist_fn(key, (*it)->remote_id());
 		if (dist < best_dist && dist >= min_dist) {
 			best_dist = dist;
-			best_peer = it;
+			best = it;
 		}
 	}
 
-	return best_peer;
+	return best;
 }
 
-network_key local_node::self_reverse_sucessor()
+template <network_key dist_fn(const network_key& src, const network_key& dest)>
+std::vector<connection::ptr_t>::const_iterator local_node::closest_peer(const network_key& outer_id,
+                                                                        const network_key& inner_id,
+                                                                        const network_key& key,
+                                                                        std::size_t content_size) const
 {
-	std::vector<connection::ptr_t>::iterator successor = get_strict_sucessor<reverse_distance>(id()-1, id()+1, id());
+	network_key max_dist = dist_fn(key, outer_id);
+	network_key min_dist = dist_fn(key, inner_id);
+
+	network_key best_dist = max_dist;
+
+	std::vector<connection::ptr_t>::const_iterator best(ib_peers_.end());
+
+	assert(max_dist >= min_dist);
+
+	for (std::vector<connection::ptr_t>::const_iterator it = ib_peers_.begin(); it != ib_peers_.end(); ++it) {
+		network_key dist = dist_fn(key, (*it)->remote_id());
+		if (dist < best_dist && dist >= min_dist) {
+			best_dist = dist;
+			best = it;
+		}
+	}
+
+	return best;
+}
+
+network_key local_node::self_sucessor() const
+{
+	std::vector<connection::ptr_t>::const_iterator successor = closest_peer<reverse_distance>(id()-1, id()+1, id());
 
 	if (successor != ib_peers_.end())
 		return (*successor)->remote_id();
@@ -177,9 +229,22 @@ network_key local_node::self_reverse_sucessor()
 		return id();
 }
 
-ip::tcp::endpoint local_node::sucessor_endpoint(const network_key& key)
+network_key local_node::self_predecessor() const
 {
-	std::vector<connection::ptr_t>::iterator target = get_sucessor<distance>(id(), key, key);
+	std::vector<connection::ptr_t>::const_iterator successor = closest_peer<distance>(id()+1, id()-1, id());
+
+	if (successor != ib_peers_.end())
+		return (*successor)->remote_id();
+	else
+		return id();
+}
+
+ip::tcp::endpoint local_node::successor_endpoint(const network_key& key)
+{
+	std::vector<connection::ptr_t>::const_iterator target = best_peer<reverse_distance>(id(), key + replication_min_dist_, key);
+
+	if (target == ib_peers_.end())
+		target = closest_peer<reverse_distance>(key-1, key+1, key);
 
 	if (target != ib_peers_.end())
 		return (*target)->remote_endpoint();
@@ -187,9 +252,12 @@ ip::tcp::endpoint local_node::sucessor_endpoint(const network_key& key)
 		return public_endpoint();
 }
 
-ip::tcp::endpoint local_node::reverse_sucessor_endpoint(const network_key& key)
+ip::tcp::endpoint local_node::predecessor_endpoint(const network_key& key)
 {
-	std::vector<connection::ptr_t>::iterator target = get_sucessor<reverse_distance>(id(), key + 1, key);
+	std::vector<connection::ptr_t>::const_iterator target = best_peer<distance>(id(), key - replication_min_dist_, key);
+
+	if (target == ib_peers_.end())
+		target = closest_peer<distance>(key+1, key-1, key);
 
 	if (target != ib_peers_.end())
 		return (*target)->remote_endpoint();
@@ -199,7 +267,7 @@ ip::tcp::endpoint local_node::reverse_sucessor_endpoint(const network_key& key)
 
 std::vector<connection::ptr_t>::iterator local_node::sucessor(const network_key& key, const network_key& inner_id, std::size_t content_size)
 {
-	return get_sucessor<distance>(id(), inner_id, key, content_size);
+	return best_peer<distance>(id(), inner_id, key, content_size);
 }
 
 void local_node::register_connection(connection::ptr_t con)
@@ -216,18 +284,18 @@ void local_node::register_connection(connection::ptr_t con)
 			DLOG(INFO) << "New in-band Connection established";
 			ib_peers_.push_back(con);
 
-			// check to see if this guy is the new successor for us
-			std::vector<connection::ptr_t>::iterator successor = get_strict_sucessor<distance>(id()+1, id()-1, id());
+			// check to see if this guy is the new predessesor for us
+			std::vector<connection::ptr_t>::iterator predessesor = closest_peer<distance>(id()+1, id()-1, id());
 
-			if (successor == --ib_peers_.end()) {
-				DLOG(INFO) << "Got new successor, checking to notify old successor";
-				// he is, see if we had a previous successor
-				std::vector<connection::ptr_t>::iterator old_successor = get_strict_sucessor<distance>(id()+1, (*successor)->remote_id()-1, id());
+			if (predessesor == --ib_peers_.end()) {
+				DLOG(INFO) << "Got new predessesor, checking to notify old successor";
+				// he is, see if we had a previous predessesor
+				std::vector<connection::ptr_t>::iterator old_predessesor = closest_peer<distance>(id()+1, (*predessesor)->remote_id()-1, id());
 
-				if (old_successor != ib_peers_.end()) {
-					DLOG(INFO) << "Old Successor found (" << std::string((*old_successor)->remote_id()) << "), notifying";
-					// we did, let him know about this new peer, this new peer is likely to be of interest to him as a reverse successor
-					(*old_successor)->send_reverse_successor();
+				if (old_predessesor != ib_peers_.end()) {
+					DLOG(INFO) << "Old predessesor found (" << std::string((*old_predessesor)->remote_id()) << "), notifying";
+					// we did, let him know about this new peer, this new peer is likely to be of interest to him as a successor
+					(*predessesor)->send_reverse_successor();
 				}
 			}
 
@@ -328,7 +396,7 @@ connection::ptr_t local_node::local_request(packet::ptr_t pkt, const network_key
 		// we don't want this packet going back through the normal dispatch path
 		pkt->mark_direct();
 
-		std::vector<connection::ptr_t>::iterator target = get_sucessor<distance>(pkt->destination() + 1, inner_id, pkt->destination(), 0);
+		std::vector<connection::ptr_t>::iterator target = best_peer<distance>(pkt->destination() + 1, inner_id, pkt->destination(), 0);
 
 		if (target != ib_peers_.end()) {
 			(*target)->send(pkt);
@@ -403,7 +471,10 @@ void local_node::snoop(packet::ptr_t pkt)
 
 connection::ptr_t local_node::dispatch(packet::ptr_t pkt)
 {
-	return dispatch(pkt, pkt->destination());
+	connection::ptr_t con = dispatch(pkt, pkt->destination() - replication_min_dist_);
+	if (!con)
+		con = dispatch(pkt, self_sucessor());
+	return con;
 }
 
 connection::ptr_t local_node::dispatch(packet::ptr_t pkt, const network_key& inner_id, bool local_request )
@@ -504,7 +575,7 @@ void local_node::packet_received(connection::ptr_t con, packet::ptr_t pkt)
 	if ( pkt->content_status() == packet::content_failure && ::distance(pkt->source(), id()) < ::distance(pkt->source(), con->remote_id()) ) {
 		// we got a failure on content which we are closer to than the sender, we must have been deparate so lets continue the desperation
 
-		std::vector<connection::ptr_t>::iterator target = get_sucessor<distance>(pkt->source() + 1, con->remote_id() - 1, pkt->source(), 0);
+		std::vector<connection::ptr_t>::iterator target = best_peer<distance>(pkt->source() + 1, con->remote_id() - 1, pkt->source(), 0);
 
 		if (target != ib_peers_.end()) {
 			// we don't want this packet going back through the normal dispatch path
@@ -543,7 +614,7 @@ void local_node::packet_received(connection::ptr_t con, packet::ptr_t pkt)
 			std::vector<connection::ptr_t>::iterator target;
 
 			for (;;) {
-				target = get_sucessor<distance>(pkt->destination() + 1, inner_id, pkt->destination(), 0);
+				target = best_peer<distance>(pkt->destination() + 1, inner_id, pkt->destination(), 0);
 
 				if (target != ib_peers_.end() && *target == protocol.get_crumb(std::make_pair(pkt->source(), pkt->destination()))) {
 					// don't do a desperation request to the peer that originated the request
@@ -591,9 +662,12 @@ void local_node::incoming_fragment(connection::ptr_t con, frame_fragment::ptr_t 
 
 void local_node::fragment_received(connection::ptr_t con, frame_fragment::ptr_t frag)
 {
-	if (frag->status() == frame_fragment::status_attached)
+	frame_fragment::fragment_status incoming_status = frag->status();
+	if (incoming_status == frame_fragment::status_attached)
 		traffic_stats_.received_content(con->remote_id(), frag->size());
-	boost::dynamic_pointer_cast<user_content>(validate_protocol(frag->protocol()))->snoop_fragment(con->remote_endpoint(), frag);
+	boost::dynamic_pointer_cast<user_content>(validate_protocol(frag->protocol()))->snoop_fragment(con->remote_id(), frag);
+	if (incoming_status == frame_fragment::status_requested)
+		direct_request(con->remote_endpoint(), frag);
 }
 
 void local_node::recompute_identity()
@@ -612,14 +686,20 @@ void local_node::recompute_identity()
 #endif
 }
 
-int local_node::closer_peers(const network_key& key)
+int local_node::closer_peers(const network_key& key) const
 {
-	network_key self_dist = ::distance(key, id());
+	return closer_peers<::distance>(key, id());
+}
+
+template <network_key dist_fn(const network_key& src, const network_key& dest)>
+int local_node::closer_peers(const network_key& src, const network_key& dest) const
+{
+	network_key base_dist = dist_fn(src, dest);
 	int closer_count = 0;
 
-	for (std::vector<connection::ptr_t>::iterator it = ib_peers_.begin(); it != ib_peers_.end(); ++it) {
-		network_key dist = ::distance(key, (*it)->remote_id());
-		if (dist < self_dist)
+	for (std::vector<connection::ptr_t>::const_iterator it = ib_peers_.begin(); it != ib_peers_.end(); ++it) {
+		network_key dist = dist_fn(src, (*it)->remote_id());
+		if (dist < base_dist)
 			closer_count++;
 	}
 	return closer_count;
@@ -660,6 +740,34 @@ boost::posix_time::time_duration local_node::base_hunk_lifetime()
 	return boost::posix_time::seconds(long(mean(peer_stats) + std::sqrt(variance(peer_stats))));
 }
 
+void local_node::add_peer(connection::ptr_t peer)
+{
+	ib_peers_.push_back(peer);
+
+	if (ib_peers_.size() > replication_factor) {
+		for (std::vector<connection::ptr_t>::iterator peer = ib_peers_.begin(); peer != ib_peers_.end(); ++peer) {
+			if (closer_peers((*peer)->remote_id()) == replication_factor) {
+				replication_min_dist_ = ::distance((*peer)->remote_id(), id());
+				break;
+			}
+		}
+	}
+}
+
+void local_node::remove_peer(connection::ptr_t peer)
+{
+	// update the closer peers count for cache policy tracking
+	for (std::list<stored_hunk>::iterator hunk = stored_hunks_.begin(); hunk != stored_hunks_.end(); ++hunk) {
+		if (!hunk->local_requested && ::distance(hunk->id, peer->remote_id()) < ::distance(hunk->id, id()))
+			hunk->closer_peers--;
+	}
+
+	ib_peers_.erase(std::find(ib_peers_.begin(), ib_peers_.end(), peer));
+
+	if (ib_peers_.size() <= replication_factor)
+		replication_min_dist_ = key_max;
+}
+
 void local_node::send_failure(connection::ptr_t con)
 {
 	// we don't want to route to this peer anymore
@@ -687,10 +795,10 @@ void local_node::disconnect_peer(connection::ptr_t con)
 		if (peer != ib_peers_.end()) {
 			DLOG(INFO) << std::string(id()) << " Disconnecting in-band peer: " << std::string(con->remote_id());
 
-			if (get_strict_sucessor<reverse_distance>(id() - 1, id() + 1, id()) == peer) {
+			if (closest_peer<reverse_distance>(id() - 1, id() + 1, id()) == peer) {
 				// we just lost our reverse successor, ask the new guy if he has a new one for us
 				DLOG(INFO) << "Lost RS";
-				std::vector<connection::ptr_t>::iterator new_rs = get_strict_sucessor<reverse_distance>(id() - 1, (*peer)->remote_id() + 1, id());
+				std::vector<connection::ptr_t>::iterator new_rs = closest_peer<reverse_distance>(id() - 1, (*peer)->remote_id() + 1, id());
 
 				if (new_rs != ib_peers_.end()) {
 					DLOG(INFO) << "Requesting new reverse successor from " << std::string((*new_rs)->remote_id());
@@ -860,32 +968,3 @@ hunk_descriptor_t local_node::load_existing_hunk(protocol_t pid, network_key id,
 	return --stored_hunks_.end();
 }
 
-void local_node::generate_cert()
-{
-	::EVP_PKEY* pk = ::EVP_PKEY_new();
-	::X509* x = ::X509_new();
-	client_key_ = ::RSA_generate_key(2048, RSA_F4, NULL, NULL);
-
-	::EVP_PKEY_assign_RSA(pk, client_key_);
-
-	::X509_set_version(x, 2);
-	::ASN1_INTEGER_set(X509_get_serialNumber(x), 1);
-	::ASN1_UTCTIME_set_string(X509_get_notBefore(x), "000101000000Z");
-	::ASN1_GENERALIZEDTIME_set_string(X509_get_notAfter(x), "99991231235959Z");
-	::X509_set_pubkey(x, pk);
-
-	::X509_NAME* name = ::X509_get_subject_name(x);
-
-	::X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC, (const unsigned char*)"anynet/0", -1, -1, 0);
-	::X509_set_issuer_name(x,name);
-
-	::X509_sign(x,pk,::EVP_md5());
-
-	std::FILE* fp = std::fopen((config().content_store_path() + "/client_id.pem").c_str(), "w");
-	::PEM_write_X509(fp, x);
-	::PEM_write_PrivateKey(fp, pk, NULL, NULL, 0, NULL, NULL);
-	std::fclose(fp);
-
-	::X509_free(x);
-	::EVP_PKEY_free(pk);
-}

@@ -40,41 +40,36 @@
 #include <openssl/rsa.h>
 #include <string>
 
-enum signature_scheme
-{
-	rsassa_pkcs1v15_sha = 0
-};
-
 class author
 {
 public:
 	author() : key_(NULL) {}
-	explicit author(unsigned int bits);
+	explicit author(const std::string& cert_file);
 
-	boost::uint16_t signature_length() { return boost::uint16_t(RSA_size(key_)); }
+	boost::uint16_t signature_length() const { return boost::uint16_t(::RSA_size(key_)); }
 	mutable_buffer sign(const_buffer message, mutable_buffer signature) const;
 
 	int serialize(mutable_buffer buf)
 	{
 		unsigned char* ptr = buffer_cast<unsigned char*>(buf);
-		return i2d_RSAPrivateKey(key_, &ptr);
+		return ::i2d_RSAPrivateKey(key_, &ptr);
 	}
 
 	int serialize()
 	{
-		return i2d_RSAPrivateKey(key_, NULL);
+		return ::i2d_RSAPrivateKey(key_, NULL);
 	}
 
 	void parse(const_buffer buf)
 	{
 		const unsigned char* ptr = buffer_cast<const unsigned char*>(buf);
-		d2i_RSAPrivateKey(&key_, &ptr, buffer_size(buf));
+		::d2i_RSAPrivateKey(&key_, &ptr, buffer_size(buf));
 	}
 
 private:
 	friend class authority;
 
-	RSA* key_;
+	::RSA* key_;
 };
 
 class authority
@@ -82,31 +77,33 @@ class authority
 public:
 	authority() : key_(NULL) {}
 	authority(const_buffer key);
-	authority(const author& auth) : key_(RSAPublicKey_dup(auth.key_)) {}
+	authority(const author& auth) : key_(::RSAPublicKey_dup(auth.key_)) {}
 	~authority();
+
+	bool valid() { return key_ == NULL; }
 
 	bool verify(const_buffer message, const_buffer signature) const;
 
-	int serialize(mutable_buffer buf)
+	int serialize(mutable_buffer buf) const
 	{
 		unsigned char* ptr = buffer_cast<unsigned char*>(buf);
-		return i2d_RSAPublicKey(key_, &ptr);
+		return ::i2d_RSAPublicKey(key_, &ptr);
 	}
 
-	int serialize()
+	int serialize() const
 	{
-		return i2d_RSAPublicKey(key_, NULL);
+		return ::i2d_RSAPublicKey(key_, NULL);
 	}
 
 	void parse(const_buffer buf)
 	{
 		const unsigned char* ptr = buffer_cast<const unsigned char*>(buf);
-		d2i_RSAPublicKey(&key_, &ptr, buffer_size(buf));
+		::d2i_RSAPublicKey(&key_, &ptr, buffer_size(buf));
 	}
 
 private:
 
-	RSA* key_;
+	::RSA* key_;
 };
 
 #endif

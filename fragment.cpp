@@ -129,7 +129,10 @@ std::vector<const_buffer> frame_fragment::serialize(std::size_t threshold, mutab
 	buffers.push_back(buffer(scratch, serialize_header(buffer_cast<boost::uint8_t*>(scratch))));
 
 	if (status_ == status_attached) {
-		buffers.push_back(buffer(payload_->get() + offset_, std::min(size_, threshold)));
+		std::size_t payload_size = std::min(size_, threshold);
+		buffers.push_back(buffer(payload_->get() + offset_, payload_size));
+		offset_ += payload_size;
+		size_ -= payload_size;
 	}
 
 	return buffers;

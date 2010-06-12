@@ -90,7 +90,7 @@ typedef boost::shared_ptr<const_shared_buffer>   const_payload_buffer_ptr;
 class heap_buffer : public mutable_shared_buffer
 {
 public:
-	heap_buffer(std::size_t size) : buffer_(size) {}
+	explicit heap_buffer(std::size_t size = 0) : buffer_(size) {}
 	void resize(std::size_t new_size) { buffer_.resize(new_size); }
 
 	virtual mutable_buffer get() { return buffer(buffer_); }
@@ -160,6 +160,82 @@ public:
 private:
 	double mean_, var_, stddev_;
 	int count_;
+};
+
+template <typename Map>
+class distance_iterator
+{
+	typedef Map map_type;
+	typedef typename map_type::const_iterator iterator;
+public:
+	distance_iterator(const map_type& map, const typename map_type::key_type& target)
+		: target_(target), map_(map)
+	{
+		low_ = map_.lower_bound(target_);
+
+		if (low_ == map_.begin())
+			low_ = --map_.end();
+		else
+			--low_;
+
+		high_ = low_;
+
+		++high_;
+
+		if (high_ == map_.end())
+			high_ = map_.begin();
+
+		low_dist_ = target_ - low_->first;
+		high_dist_ = high_->first - target_;
+
+		if (low_dist_ < high_dist_)
+			cur_ = low_;
+		else
+			cur_ = high_;
+	}
+
+	distance_iterator<map_type>& operator++()
+	{
+		if (low_ != high_) {
+			if (cur_ == low_) {
+				if (low_ == map_.begin())
+					low_ = --map_.end();
+				else
+					--low_;
+				low_dist_ = target_ - low_->first;
+			}
+			else {
+				++high_;
+				if (high_ == map_.end())
+					high_ = map_.begin();
+				high_dist_ = high_->first - target_;
+			}
+		}
+
+		if (low_dist_ < high_dist_)
+			cur_ = low_;
+		else
+			cur_ = high_;
+
+		return *this;
+	}
+
+	const typename map_type::value_type& operator*()
+	{
+		return *cur_;
+	}
+
+	const typename map_type::value_type* operator->()
+	{
+		return &(*cur_);
+	}
+
+	iterator get() { return cur_; }
+
+private:
+	const map_type& map_;
+	typename map_type::key_type low_dist_, high_dist_, target_;
+	iterator low_, high_, cur_;
 };
 
 #endif

@@ -99,11 +99,11 @@ public:
 		else
 			boost::asio::async_read(link.socket,
 			                        mutable_buffers_1(link.receive_buffer(header_size())),
-									boost::asio::transfer_at_least(header_size() - link.valid_received_bytes()),
+			                        boost::asio::transfer_at_least(header_size() - link.valid_received_bytes()),
 			                        boost::bind(&packet::header_received<Handler>,
 			                                    shared_from_this(),
-												boost::ref(link),
-												handler,
+			                                    boost::ref(link),
+			                                    handler,
 			                                    placeholders::error,
 			                                    placeholders::bytes_transferred));
 	}

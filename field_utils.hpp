@@ -68,6 +68,15 @@ inline boost::uint16_t u16(const boost::uint8_t b[2]) { return b[0] << 8 | b[1];
 
 inline boost::uint32_t u32(const boost::uint8_t b[4]) { return b[0] << 24 | b[1] << 16 | b[2] << 8 | b[3]; }
 
+inline boost::uint64_t u64(const boost::uint8_t b[8]) { return boost::uint64_t(b[0]) << 56
+                                                             | boost::uint64_t(b[1]) << 48
+                                                             | boost::uint64_t(b[2]) << 40
+                                                             | boost::uint64_t(b[3]) << 32
+                                                             | boost::uint64_t(b[4]) << 24
+                                                             | boost::uint64_t(b[5]) << 16
+                                                             | boost::uint64_t(b[6]) << 8
+                                                             | boost::uint64_t(b[7]); }
+
 inline void u16(boost::uint8_t b[2], boost::uint16_t i) { b[0] = i >> 8; b[1] = i & 0xFF; }
 
 inline void u32(boost::uint8_t b[4], boost::uint32_t i) { b[0] = i >> 24; b[1] = i >> 16 & 0xFF; b[2] = i >> 8 & 0xFF; b[3] = i & 0xFF; }

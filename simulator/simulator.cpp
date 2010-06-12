@@ -62,7 +62,7 @@ void network_simulator::tick(const boost::system::error_code& error)
 		/*
 		for (std::vector<boost::shared_ptr<traffic_generator> >::iterator client = clients.begin(); client != clients.end(); ++client)
 			if ((*client))
-				verify_reverse_successor((*client)->node_.id(), (*client)->node_.self_reverse_sucessor());*/
+				verify_reverse_successor((*client)->node_.id(), (*client)->node_.self_predecessor());*/
 
 		if (clients.size() < target_node_count) {
 			clients.push_back(boost::shared_ptr<traffic_generator>(new traffic_generator(io_service, clients.size())));
@@ -89,7 +89,7 @@ void network_simulator::tick(const boost::system::error_code& error)
 
 		client_hitlist_.clear();
 	}
-	tick_timer_.expires_from_now(boost::posix_time::milliseconds(100));
+	tick_timer_.expires_from_now(boost::posix_time::milliseconds(1000));
 	tick_timer_.async_wait(boost::bind(&network_simulator::tick, this, placeholders::error));
 	google::FlushLogFiles(google::INFO);
 }

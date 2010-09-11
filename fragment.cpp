@@ -37,11 +37,11 @@
 struct packed_fragment_header
 {
 	boost::uint8_t frame_type;
-	boost::uint8_t protocol;
-	boost::uint8_t rsvd[2];
+	boost::uint8_t sig[2];
+	boost::uint8_t status_name_components;
 	boost::uint8_t key[network_key::packed_size];
-	boost::uint8_t offset[4];
-	boost::uint8_t size[4];
+	boost::uint8_t offset[8];
+	boost::uint8_t size[8];
 };
 
 framented_content::fragment_buffer framented_content::get_fragment_buffer(std::size_t offset, std::size_t size)
@@ -88,45 +88,53 @@ std::size_t frame_fragment::header_size()
 	return sizeof(packed_fragment_header);
 }
 
-std::size_t frame_fragment::serialize_header(boost::uint8_t* buf)
+std::size_t frame_fragment::serialize_header(mutable_buffer buf)
 {
-	packed_fragment_header* h = reinterpret_cast<packed_fragment_header*>(buf);
+	packed_fragment_header* h = buffer_cast<packed_fragment_header*>(buf);
 
 	h->frame_type = connection::frame_fragment;
-	h->protocol = protocol_;
-	h->protocol |= status() << 6;
-	id_.encode(h->key);
-	u32(h->offset, offset_);
-	u32(h->size, size_);
+	u16(h->sig, protocol_);
+	h->status_name_components = id_.name.component_count() | (status() << 6);
+	id_.publisher.encode(h->key);
+	u64(h->offset, offset_);
+	u64(h->size, size_);
 
-	return sizeof(packed_fragment_header);
+	return sizeof(packed_fragment_header) + id_.name.serialize(buf + sizeof(packed_fragment_header));
 }
 
-std::size_t frame_fragment::parse_header(const_buffer buf)
+std::pair<std::size_t, unsigned> frame_fragment::parse_header(const_buffer buf)
 {
 	const packed_fragment_header* h = buffer_cast<const packed_fragment_header*>(buf);
 
-	protocol_ = h->protocol & 0x3F;
-	status_ = fragment_status(h->protocol >> 6);
+	protocol_ = u16(h->sig);
+	status_ = fragment_status(h->status_name_components >> 6);
 	if (status_ == 2)
 		status_ = status_failed;
-	id_.decode(h->key);
-	offset_ = u32(h->offset);
-	size_ = u32(h->size);
+	id_.publisher.decode(h->key);
+
+	content_size_t size = u64(h->size), offset = u64(h->offset);
+
+	if (offset + size > std::numeric_limits<std::size_t>::max() || offset + size < offset) {
+		offset_ = size_ = 0;
+	}
+	else {
+		offset_ = std::size_t(u64(h->offset));
+		size_ = std::size_t(u64(h->size));
+	}
 
 	if (status_ == status_attached)
-		return size_;
+		return std::make_pair(size_, h->status_name_components & 0x3F);
 	else
-		return 0;
+		return std::make_pair(0, h->status_name_components & 0x3F);
 }
 
 std::vector<const_buffer> frame_fragment::serialize(std::size_t threshold, mutable_buffer scratch)
 {
-	DLOG(INFO) << "Sending fragment id=" << std::string(id());
+	DLOG(INFO) << "Sending fragment id=" << std::string(id().publisher);
 	assert(buffer_size(scratch) >= sizeof(packed_fragment_header));
 
 	std::vector<const_buffer> buffers;
-	buffers.push_back(buffer(scratch, serialize_header(buffer_cast<boost::uint8_t*>(scratch))));
+	buffers.push_back(buffer(scratch, serialize_header(scratch)));
 
 	if (status_ == status_attached) {
 		std::size_t payload_size = std::min(size_, threshold);

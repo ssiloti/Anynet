@@ -186,65 +186,7 @@ void known_peers::received_content(const network_key& id, std::size_t bytes)
 	total_received_ += bytes;
 	max_credited_ = std::max(max_credited_, peer->second.get_credited(boost::posix_time::second_clock::universal_time(), average_bytes_sent_per_day()));
 }
-/*
-std::vector<known_peers::credit_type> known_peers::best_credits(const network_key& id, unsigned max_returned)
-{
-#if 0
-	struct peer_id_cmp
-	{
-		bool operator()(const peers_t::value_type& l, const network_key& r)
-		{
-			return l.first < r;
-		}
 
-		bool operator()(const network_key& l, const peers_t::value_type& r)
-		{
-			return l < r.first;
-		}
-	};
-#endif
-	typedef std::vector<boost::tuple<network_key, boost::posix_time::ptime, double> > potentials_t;
-
-#if 0
-	if (peers_.empty())
-		return std::vector<credit_type>();
-#endif
-
-	potentials_t potentials;
-	boost::uint64_t bytes_per_day = average_bytes_sent_per_day();
-	boost::posix_time::ptime now = boost::posix_time::second_clock::universal_time();
-	boost::posix_time::time_duration max_credit = max_credited_ - now;
-
-#if 0
-	peers_t::iterator next_peer_high = std::lower_bound(peers_.begin(), peers_.end(), id, peer_id_cmp());
-	peers_t::iterator next_peer_low = next_peer_high;
-
-	if (next_peer_low != peers_.begin())
-		--next_peer_low;
-
-	int closer_peers = 0;
-#endif
-
-	for (peers_t::const_iterator peer = peers_.begin(); peer != peers_.end(); ++peer) {
-		double score = ((peer->first - id) / key_max)                                                                       * 0.5
-		             + (double((peer->second.get_credited(now, bytes_per_day) - now).hours()) / double(max_credit.hours())) * 0.5;
-
-		for (potentials_t::iterator potential = potentials.begin(); potential != potentials.end(); ++potential) {
-			if (score > potential->get<2>()) {
-				if (potentials.size() > max_returned)
-					potentials.pop_back();
-				potentials.insert(potential, boost::make_tuple(peer->first, peer->second.get_credited(now, bytes_per_day), score));
-			}
-		}
-	}
-
-	std::vector<credit_type> ret;
-
-	for (potentials_t::iterator potential = potentials.begin(); potential != potentials.end(); ++potential)
-		ret.push_back(credit_type(potential->get<0>(), potential->get<1>()));
-
-	return ret;
-}*/
 /*
 std::pair<known_peers::derived_t::iterator, known_peers::persistent_t::iterator> known_peers::get_record(const network_key& id)
 {

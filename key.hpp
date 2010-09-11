@@ -49,6 +49,64 @@
 
 using boost::asio::const_buffer;
 
+// A convenient interface to the network hash function (SHA256 as of protocol version 0)
+class net_hash
+{
+public:
+	typedef boost::array<boost::uint8_t, SHA256_DIGEST_LENGTH> digest_t;
+
+	net_hash() { ::SHA256_Init(&ctx_); }
+	net_hash(const_buffer b)
+	{
+		::SHA256_Init(&ctx_);
+		update(b);
+	}
+
+	template <std::size_t N>
+	net_hash(const boost::array<boost::uint8_t, N>& d)
+	{
+		::SHA256_Init(&ctx_);
+		update(d);
+	}
+
+	operator digest_t() const
+	{
+		return final();
+	}
+
+	template <std::size_t N>
+	void update(const boost::array<boost::uint8_t, N>& d)
+	{
+		::SHA256_Update(&ctx_, d.data(), d.size());
+	}
+
+	void update(const digest_t& d)
+	{
+		::SHA256_Update(&ctx_, d.data(), d.size());
+	}
+
+	void update(const std::vector<boost::uint8_t>& d)
+	{
+		::SHA256_Update(&ctx_, &d[0], d.size());
+	}
+
+	void update(const_buffer b)
+	{
+		::SHA256_Update(&ctx_, buffer_cast<const void*>(b), buffer_size(b));
+	}
+
+	digest_t final() const
+	{
+		digest_t d;
+		::SHA256_CTX c(ctx_);
+		::SHA256_Final(d.data(), &c);
+		return d;
+	}
+
+private:
+	::SHA256_CTX ctx_;
+};
+
 class network_key : boost::totally_ordered<network_key, boost::additive<network_key, boost::additive<network_key, unsigned int> > >
 {
 	typedef boost::uint64_t intermediate_t;
@@ -96,6 +154,11 @@ public:
 	explicit network_key(const boost::uint8_t* buf)
 	{
 		decode(buf);
+	}
+
+	network_key(const net_hash& hash)
+	{
+		decode(net_hash::digest_t(hash).data());
 	}
 
 	explicit network_key(std::istream& strm)

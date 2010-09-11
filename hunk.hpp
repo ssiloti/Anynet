@@ -38,6 +38,8 @@
 
 #include "core.hpp"
 #include "key.hpp"
+#include "content.hpp"
+#include <db_cxx.h>
 #include <boost/interprocess/file_mapping.hpp>
 #include <boost/interprocess/mapped_region.hpp>
 #include <boost/smart_ptr.hpp>
@@ -56,18 +58,18 @@ class local_node;
 
 struct stored_hunk
 {
-	stored_hunk(protocol_t p, network_key k, std::size_t s, int closer, bool local)
-		: protocol(p), id(k), size(s), closer_peers(closer), local_requested(local),
+	stored_hunk(signature_scheme_id p, content_identifier k, std::size_t s, int closer, bool local)
+		: sig(p), id(k), size(s), closer_peers(closer), local_requested(local),
 		last_access(boost::posix_time::second_clock::universal_time()),
 		stored(boost::posix_time::second_clock::universal_time())
 	{}
-	network_key id;
+	content_identifier id;
 	boost::posix_time::ptime last_access;
 	boost::posix_time::ptime stored;
 	std::size_t size;
 	int closer_peers;
 	bool local_requested;
-	protocol_t protocol;
+	signature_scheme_id sig;
 };
 
 typedef std::list<stored_hunk> stored_hunks_t;
@@ -88,7 +90,7 @@ class content_store_base;
 
 struct mapped_content : ::detail::mapped_content_base, public mutable_shared_buffer
 {
-	friend class ::detail::content_store_base;
+	friend class content_store;
 
 	typedef boost::shared_ptr<mapped_content> ptr;
 	typedef boost::shared_ptr<const mapped_content> const_ptr;
@@ -137,55 +139,20 @@ struct stored_content
 	hunk_descriptor_t desc;
 };
 
-namespace detail
+class content_store
 {
-
-class content_store_base
-{
-public:
-	mapped_content::ptr get_temp(std::size_t size);
-
-protected:
-	content_store_base(const std::string& path)
-		: path_(path)
-	{
-	}
-
-	std::string content_path(const network_key& key, bool create_dirs=false) const;
-	stored_content do_load_content(boost::filesystem::directory_iterator file, protocol_t pid, local_node& node);
-	const_payload_buffer_ptr do_get(stored_content& stored);
-	mapped_content::const_ptr do_put(stored_content& stored, mapped_content::ptr content);
-	mapped_content::const_ptr do_put(stored_content& stored, std::vector<const_buffer> content);
-	void unlink_storage(stored_content& stored);
-	void do_flush(stored_content& stored);
-
-	std::string path_;
-};
-
-struct no_client_data {};
-
-}
-
-template <typename ClientHunkData = ::detail::no_client_data>
-class content_store : public ::detail::content_store_base
-{
-	struct content_descriptor : public stored_content, public ClientHunkData
-	{
-		content_descriptor(stored_content c) : stored_content(c) {}
-		ClientHunkData& client_data() const { return *this; }
-	};
-
 private:
-	typedef std::map<network_key, content_descriptor> stored_contents_t;
-	typedef typename stored_contents_t::iterator iterator;
+	typedef std::map<content_identifier, stored_content> stored_contents_t;
+	typedef stored_contents_t::iterator iterator;
 
 public:
-	typedef typename stored_contents_t::const_iterator const_iterator;
+	typedef stored_contents_t::const_iterator const_iterator;
 
-	content_store(const std::string& path, protocol_t pid, local_node& node)
-		: content_store_base(path)
+	content_store(const std::string& path, signature_scheme_id pid, local_node& node)
+		: path_(path), db_(NULL, 0)
 	{
-		boost::filesystem::create_directories(boost::filesystem::path(path));
+		boost::filesystem::create_directories(boost::filesystem::path(path_));
+		db_.open(NULL, (path_ + "/index.db").c_str(), NULL, DB_BTREE, DB_CREATE, 0);
 		load_contents(path_, pid, node);
 	}
 
@@ -203,9 +170,14 @@ public:
 	const_iterator begin() const { return stored_contents_.begin(); }
 	const_iterator end() const { return stored_contents_.end(); }
 
-	const_iterator stat(const network_key& key) { return stored_contents_.find(key); }
+	mapped_content::ptr get_temp(std::size_t size);
 
-	const_payload_buffer_ptr get(const network_key& key)
+	const_iterator stat(const content_identifier& key) { return stored_contents_.find(key); }
+
+	mapped_content::const_ptr put(hunk_descriptor_t desc, std::vector<const_buffer> content);
+	mapped_content::const_ptr put(hunk_descriptor_t desc, mapped_content::ptr content);
+
+	const_payload_buffer_ptr get(const content_identifier& key)
 	{
 		iterator stored_contents = stored_contents_.find(key);
 
@@ -215,67 +187,21 @@ public:
 		return do_get(stored_contents->second);
 	}
 
-	mapped_content::const_ptr put(hunk_descriptor_t desc, std::vector<const_buffer> content)
-	{
-		iterator stored_contents = stored_contents_.find(desc->id);
-
-		if (stored_contents != stored_contents_.end()) {
-			// On POSIX we should be using the rename to overwrite the existing file
-			// But windows cannot handle that, so don't bother for now
-			// This will only become an issue when we start doing multi-threading/processing
-			unlink_storage(stored_contents->second);
-		}
-		else {
-			stored_contents = stored_contents_.insert(std::make_pair(desc->id, stored_content(desc))).first;
-		}
-
-		stored_contents->second.desc = desc;
-
-		return do_put(stored_contents->second, content);
-	}
-
-	mapped_content::const_ptr put(hunk_descriptor_t desc, mapped_content::ptr content)
-	{
-		iterator stored_contents = stored_contents_.find(desc->id);
-
-		if (stored_contents != stored_contents_.end()) {
-			// On POSIX we should be using the rename to overwrite the existing file
-			// But windows cannot handle that, so don't bother for now
-			// This will only become an issue when we start doing multi-threading/processing
-			unlink_storage(stored_contents);
-		}
-		else {
-			stored_contents = stored_contents_.insert(std::make_pair(desc->id, stored_content(desc))).first;
-		}
-
-		stored_contents->second.desc = desc;
-
-		return do_put(stored_contents->second, content);
-	}
-
-	void unlink(const network_key& key)
-	{
-		iterator stored_contents = stored_contents_.find(key);
-		unlink_storage(stored_contents->second);
-		stored_contents_.erase(stored_contents);
-	}
+	void unlink(const content_identifier& key);
 
 private:
-	void load_contents(boost::filesystem::path dir_path, protocol_t pid, local_node& node)
-	{
-		if (!boost::filesystem::exists(dir_path)) return;
-		boost::filesystem::directory_iterator end;
-		for (boost::filesystem::directory_iterator it( dir_path ); it != end; ++it) {
-			if (boost::filesystem::is_directory(it->status()))
-				load_contents(it->path(), pid, node);
-			else {
-				network_key key(it->filename());
-				stored_contents_.insert(std::make_pair(key, do_load_content(it, pid, node)));
-			}
-		}
-	}
+	void load_contents(boost::filesystem::path dir_path, signature_scheme_id pid, local_node& node);
 
+	void generate_db_key(const content_identifier& id, std::vector<boost::uint8_t>& buf);
+
+	std::string content_path(const_buffer db_key, bool create_dirs=false) const;
+	const_payload_buffer_ptr do_get(stored_content& stored);
+	void unlink_storage(stored_content& stored);
+	void do_flush(stored_content& stored);
+
+	std::string path_;
 	stored_contents_t stored_contents_;
+	Db db_;
 };
 
 #endif

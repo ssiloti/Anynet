@@ -55,7 +55,7 @@ struct link_handshake
 	boost::uint8_t rsvd[2];
 	boost::uint8_t incoming_port[2];
 	boost::uint8_t supported_protocol_count;
-	boost::uint8_t supported_protocols[1];
+	boost::uint8_t supported_protocols[1][2];
 };
 
 struct oob_threshold_frame
@@ -194,9 +194,9 @@ void connection::read_handshake(const boost::system::error_code& error, std::siz
 template <typename Adr>
 const_buffer connection::do_generate_handshake()
 {
-	const std::vector<protocol_t>& protocols = node_.supported_protocols();
+	const std::vector<signature_scheme_id>& protocols = node_.supported_protocols();
 	link_handshake<Adr>* handshake = buffer_cast<link_handshake<Adr>*>( link_.send_buffer(sizeof(link_handshake<Adr>)
-	                                                                    + protocols.size() - 1) );
+	                                                                    + (protocols.size() - 1) * 2) );
 	handshake->sig[0] = 'A';
 	handshake->sig[1] = 'N';
 	handshake->protocol = link_.protocol_version;
@@ -208,7 +208,9 @@ const_buffer connection::do_generate_handshake()
 	u16(handshake->incoming_port, node_.config().listen_port());
 
 	handshake->supported_protocol_count = protocols.size();
-	std::copy(protocols.begin(), protocols.end(), handshake->supported_protocols);
+	for (std::vector<signature_scheme_id>::const_iterator sig = protocols.begin(); sig != protocols.end(); ++sig) {
+		u16(handshake->supported_protocols[sig - protocols.begin()], *sig);
+	}
 
 	return link_.sendable_buffer();
 }
@@ -240,7 +242,7 @@ bool connection::do_parse_handshake()
 	reported_peer_address_ = Adr(ip_bytes);
 
 	supported_protocols_.resize(handshake->supported_protocol_count);
-	link_.consume_receive_buffer(sizeof(link_handshake<Adr>) - 1);
+	link_.consume_receive_buffer(sizeof(link_handshake<Adr>) - sizeof(handshake->supported_protocols));
 
 	return true;
 }
@@ -272,7 +274,7 @@ void connection::handshake_received(const boost::system::error_code& error, std:
 
 	remote_identity_ = network_key(::SSL_get_peer_certificate(link_.socket.impl()->ssl));
 
-	if (supported_protocols_.size() > link_.valid_received_bytes())
+	if (supported_protocols_.size() * 2 > link_.valid_received_bytes())
 		boost::asio::async_read(link_.socket,
 		                        mutable_buffers_1(link_.receive_buffer()),
 		                        boost::asio::transfer_at_least(supported_protocols_.size() - link_.valid_received_bytes()),
@@ -296,19 +298,22 @@ void connection::complete_connection(const boost::system::error_code& error, std
 
 	link_.received(bytes_transferred);
 
-	const boost::uint8_t* supported_protocols = buffer_cast<const boost::uint8_t*>(link_.received_buffer());
-	std::copy(supported_protocols, supported_protocols + supported_protocols_.size(), supported_protocols_.begin());
-	link_.consume_receive_buffer(supported_protocols_.size());
+	const boost::uint8_t (*supported_protocols)[2] = buffer_cast<const boost::uint8_t(*)[2]>(link_.received_buffer());
+	for (std::vector<signature_scheme_id>::iterator sig = supported_protocols_.begin(); sig != supported_protocols_.end(); ++sig) {
+		*sig = u16(supported_protocols[sig - supported_protocols_.begin()]);
+	}
+	link_.consume_receive_buffer(supported_protocols_.size() * 2);
 
 	lifecycle_ = connected;
+
 	established_ = boost::posix_time::second_clock::universal_time();
 	DLOG(INFO) << "Connected with cipher: " << ::SSL_CIPHER_get_name(::SSL_get_current_cipher(link_.socket.impl()->ssl)); //<< " and compression: " << ::SSL_COMP_get_name(::SSL_get_current_compression(link_.socket.impl()->ssl));
 	node_.register_connection(shared_from_this());
 
 	if (accepts_ib_traffic())
 		outstanding_non_packet_frames_ |= frame_bit_successor_request;
-	receive_next_frame();
 	send_next_frame();
+	receive_next_frame();
 }
 
 void connection::send(packet::ptr_t pkt)
@@ -358,7 +363,7 @@ void connection::frame_head_received(const boost::system::error_code& error, std
 
 	link_.received(bytes_transfered);
 
-//	DLOG(INFO) << "Recieved " << bytes_transfered << " bytes, total buffered: " << link_.valid_recv_bytes;
+	DLOG(INFO) << std::string(node_.id()) << " Recieved " << bytes_transfered << " bytes, total buffered: " << link_.valid_received_bytes();
 
 	while (link_.valid_received_bytes())
 	{
@@ -389,6 +394,7 @@ void connection::frame_head_received(const boost::system::error_code& error, std
 		case frame_successor_request:
 			{
 				if (link_.valid_received_bytes() >= 4) {
+					DLOG(INFO) << std::string(node_.id()) << "Sending successor";
 					send_next_frame(frame_bit_successor);
 					link_.consume_receive_buffer(4);
 					break;
@@ -548,7 +554,7 @@ std::size_t do_generate_successor_frame(net_link& link, const Addr& sucessor_add
 
 void connection::send_next_frame(int send_non_packet_frame)
 {
-	if (outstanding_non_packet_frames_ || !packet_queue_.empty() || !fragment_queue_.empty()) {
+	if (!outstanding_non_packet_frames_ && packet_queue_.empty() && fragment_queue_.empty() && lifecycle_ == connected) {
 		outstanding_non_packet_frames_ |= send_non_packet_frame;
 		send_next_frame();
 	}
@@ -583,7 +589,7 @@ void connection::send_next_frame()
 		                                     frame_bit_successor_request,
 		                                     placeholders::error,
 		                                     placeholders::bytes_transferred));
-		DLOG(INFO) << std::string(node_.id()) << " Wrote " << 4 << " bytes to socket";
+		DLOG(INFO) << std::string(node_.id()) << " Wrote " << 4 << " bytes to " << std::string(remote_id()).substr(0, 4);
 	}
 	else if (outstanding_non_packet_frames_ & frame_bit_successor) {
 		ip::tcp::endpoint successor = node_.successor_endpoint(remote_identity_);
@@ -600,7 +606,7 @@ void connection::send_next_frame()
 		                                     frame_bit_successor,
 		                                     placeholders::error,
 		                                     placeholders::bytes_transferred));
-		DLOG(INFO) << std::string(node_.id()) << " Wrote " << buffer_size(link_.sendable_buffer()) << " bytes to socket";
+		DLOG(INFO) << std::string(node_.id()) << " Wrote " << buffer_size(link_.sendable_buffer()) << " bytes to " << std::string(remote_id()).substr(0, 4);
 	}
 	else if (!packet_queue_.empty()) {
 		DLOG(INFO) << "Sending packet from " << std::string(node_.id()) << " to " << std::string(remote_id());
@@ -610,6 +616,9 @@ void connection::send_next_frame()
 		for (std::vector<const_buffer>::const_iterator buf = send_buffers.begin(); buf != send_buffers.end(); ++buf)
 			bytes_transfered += buffer_size(*buf);
 		ack_queue_.push_back(pending_ack(packet_queue_.front().entered, bytes_transfered));
+
+		assert(buffer_cast<const boost::uint8_t*>(send_buffers.front())[0] == 0);
+		DLOG(INFO) << "Sending " << bytes_transfered << " bytes";
 
 		boost::asio::async_write(link_.socket,
 		                         send_buffers,
@@ -630,7 +639,9 @@ void connection::packet_sent(const boost::system::error_code& error, std::size_t
 {
 	if (!error && link_.socket.lowest_layer().is_open()) {
 
-	//	DLOG(INFO) << std::string(node_.id()) << " Sent " << bytes_transfered << " bytes of content";
+		DLOG(INFO) << std::string(node_.id()) << " Sent " << bytes_transfered << " bytes of content";
+
+		assert(buffer_cast<const boost::uint8_t*>(link_.sendable_buffer())[0] == 0);
 
 		node_.sent_content(remote_id(), bytes_transfered);
 		packet_queue_.pop_front();

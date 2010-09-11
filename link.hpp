@@ -127,6 +127,7 @@ public:
 		receive_buffer_.resize(valid_receive_bytes_ += bytes);
 #else
 		valid_receive_bytes_ += bytes;
+		DLOG(INFO) << "Received " << bytes << " bytes";
 #endif
 	}
 

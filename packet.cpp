@@ -50,11 +50,10 @@ bool content_sources::source_cmp::operator()(const source& l, const source& r)
 struct packed_header
 {
 	boost::uint8_t frame_type;
-	boost::uint8_t protocol;
-	boost::uint8_t rsvd;
-	boost::uint8_t status;
+	boost::uint8_t sig_scheme[2];
+	boost::uint8_t status_name_components;
 	boost::uint8_t destination[network_key::packed_size];
-	boost::uint8_t payload_size[4];
+	boost::uint8_t payload_size[8];
 };
 
 std::size_t packet::header_size()
@@ -62,14 +61,14 @@ std::size_t packet::header_size()
 	return sizeof(packed_header);
 }
 
-std::size_t packet::parse_header(const_buffer buf)
+std::pair<content_size_t, unsigned> packet::parse_header(const_buffer buf)
 {
 	const packed_header* header = buffer_cast<const packed_header*>(buf);
 
-	content_status(content_status_t(header->status & 0x03));
-	protocol(header->protocol);
+	content_status(content_status_t((header->status_name_components & 0xC0) >> 6));
+	sig(u16(header->sig_scheme));
 	destination(network_key(header->destination));
-	return u32(header->payload_size);
+	return std::make_pair(u64(header->payload_size), header->status_name_components & 0x3F);
 }
 
 std::size_t packet::serialize_header(mutable_buffer buf)
@@ -77,11 +76,11 @@ std::size_t packet::serialize_header(mutable_buffer buf)
 	packed_header* header = buffer_cast<packed_header*>(buf);
 	
 	header->frame_type = connection::frame_network_packet;
-	header->protocol = protocol();
-	header->status = content_status();
+	u16(header->sig_scheme, sig());
+	header->status_name_components = (content_status() << 6) | name().component_count();
 	destination().encode(header->destination);
 
-	return sizeof(packed_header);
+	return sizeof(packed_header) + name().serialize(buf + sizeof(packed_header), false);
 }
 
 std::vector<const_buffer> packet::serialize(std::size_t threshold,mutable_buffer scratch)
@@ -94,15 +93,15 @@ std::vector<const_buffer> packet::serialize(std::size_t threshold,mutable_buffer
 	if (payload_.get() != NULL) {
 		const std::vector<const_buffer>& payload_buffers = payload_->serialize(shared_from_this(), threshold, scratch + buffer_size(buffers.back()));
 
-		std::size_t payload_size = 0;
+		content_size_t payload_size = 0;
 		for (std::vector<const_buffer>::const_iterator pbuf = payload_buffers.begin(); pbuf != payload_buffers.end(); ++pbuf)
 			payload_size += buffer_size(*pbuf);
-		u32(buffer_cast<packed_header*>(scratch)->payload_size, payload_size);
+		u64(buffer_cast<packed_header*>(scratch)->payload_size, payload_size);
 
 		buffers.insert(buffers.end(), payload_buffers.begin(), payload_buffers.end());
 	}
 
-//	assert(link.send_buffer[0] == connection::frame_network_packet);
+	assert(buffer_cast<packed_header*>(scratch)->frame_type == connection::frame_network_packet);
 	
 	return buffers;
 }

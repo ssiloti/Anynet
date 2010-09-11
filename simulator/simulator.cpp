@@ -33,7 +33,7 @@
 
 #include "simulator.hpp"
 #include "traffic_generator.hpp"
-#include "protocols/non_authoritative.hpp"
+#include "signature_schemes/non_authoritative.hpp"
 #include "node.hpp"
 #include <boost/smart_ptr.hpp>
 #include <vector>
@@ -89,7 +89,7 @@ void network_simulator::tick(const boost::system::error_code& error)
 
 		client_hitlist_.clear();
 	}
-	tick_timer_.expires_from_now(boost::posix_time::milliseconds(1000));
+	tick_timer_.expires_from_now(boost::posix_time::milliseconds(200));
 	tick_timer_.async_wait(boost::bind(&network_simulator::tick, this, placeholders::error));
 	google::FlushLogFiles(google::INFO);
 }

@@ -98,7 +98,7 @@ public:
 	bool is_connected() const { return lifecycle_ == connected; }
 	boost::posix_time::time_duration age() { return boost::posix_time::second_clock::universal_time() - established_; }
 	bool is_transfer_outstanding() const { return transfer_outstanding_ || outstanding_non_packet_frames_ || !packet_queue_.empty() || !fragment_queue_.empty(); }
-	bool supports_protocol(protocol_t p) { return std::find(supported_protocols_.begin(), supported_protocols_.end(), p) != supported_protocols_.end(); }
+	bool supports_protocol(signature_scheme_id p) { return std::find(supported_protocols_.begin(), supported_protocols_.end(), p) != supported_protocols_.end(); }
 
 	void send_reverse_successor()
 	{
@@ -141,6 +141,7 @@ public:
 		std::vector<mutable_buffer>::iterator begin = bufs.begin();
 		while (begin != bufs.end()) {
 			std::size_t consumed = std::min(link_.valid_received_bytes(), buffer_size(*begin));
+			DLOG(INFO) << "Consuming " << consumed;
 			std::memcpy(buffer_cast<void*>(*begin),
 			            buffer_cast<const void*>(link_.received_buffer()),
 			            consumed);
@@ -246,6 +247,7 @@ private:
 	void payload_received(Handler handler, const boost::system::error_code& error, std::size_t bytes_transfered)
 	{
 		if (!error) {
+			DLOG(INFO) << "Received " << bytes_transfered << " bytes";
 			handler();
 			receive_next_frame();
 		}
@@ -318,7 +320,7 @@ private:
 
 	network_key remote_identity_;
 	ip::address reported_peer_address_;
-	std::vector<protocol_t> supported_protocols_;
+	std::vector<signature_scheme_id> supported_protocols_;
 
 	std::deque<queued_packet> packet_queue_;
 	std::deque<frame_fragment::ptr_t> fragment_queue_;

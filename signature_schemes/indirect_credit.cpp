@@ -31,10 +31,11 @@
 //
 // Contact:  Steven Siloti <ssiloti@gmail.com>
 
-#include "protocols/indirect_credit.hpp"
+#include "signature_schemes/indirect_credit.hpp"
 #include "node.hpp"
 #include <boost/bind/protect.hpp>
 #include <boost/bind.hpp>
+#include <boost/make_shared.hpp>
 #include <stdexcept>
 
 struct stored_single_credit
@@ -292,7 +293,7 @@ public:
 		int credit_count = *buffer_cast<const boost::uint8_t*>(buf);
 		buf = buf + 1;
 
-		pkt->payload(new payload_credits<store_type>(store));
+		pkt->payload(boost::make_shared<payload_credits<store_type> >(store));
 		//payload_credits<store_type>& credits = *pkt->payload_as<payload_credits<store_type> >();
 
 		for (;credit_count > 0; --credit_count) {
@@ -344,63 +345,11 @@ private:
 	const store_type& store_;
 };
 
-class payload_credits_request : public sendable_payload
-{
-public:
-	virtual std::vector<const_buffer> serialize(boost::shared_ptr<packet> pkt, std::size_t threshold, mutable_buffer scratch) const
-	{
-		packed_request* req = buffer_cast<packed_request*>(scratch);
-		pkt->source().encode(req->key);
-		return std::vector<const_buffer>(1, buffer(scratch, sizeof(packed_request)));
-	}
-
-	static std::size_t parse(packet::ptr_t pkt, const_buffer buf)
-	{
-		const packed_request* req = buffer_cast<const packed_request*>(buf);
-
-		pkt->source(network_key(req->key));
-		pkt->payload(new payload_credits_request());
-		return sizeof(packed_request);
-	}
-
-private:
-	struct packed_request
-	{
-		boost::uint8_t key[network_key::packed_size];
-	};
-};
-
-class payload_credits_failure : public sendable_payload
-{
-public:
-	virtual std::vector<const_buffer> serialize(boost::shared_ptr<packet> pkt, std::size_t threshold, mutable_buffer scratch) const
-	{
-		packed_failure* req = buffer_cast<packed_failure*>(scratch);
-		pkt->source().encode(req->key);
-		return std::vector<const_buffer>(1, buffer(scratch, sizeof(packed_failure)));
-	}
-
-	static std::size_t parse(packet::ptr_t pkt, const_buffer buf)
-	{
-		const packed_failure* req = buffer_cast<const packed_failure*>(buf);
-
-		pkt->source(network_key(req->key));
-		pkt->payload(new payload_credits_failure());
-		return sizeof(packed_failure);
-	}
-
-private:
-	struct packed_failure
-	{
-		boost::uint8_t key[network_key::packed_size];
-	};
-};
-
 indirect_credit::indirect_credit(local_node& node)
-	: network_protocol(node), store_(node.io_service(), node.config().content_store_path() + "/indirect_credits")
+	: signature_scheme(node, protocol_id), store_(node.io_service(), node.config().content_store_path() + "/indirect_credits")
 {}
 
-void indirect_credit::receive_payload(connection::ptr_t con, packet::ptr_t pkt, std::size_t payload_size)
+void indirect_credit::receive_attached_content(connection::ptr_t con, packet::ptr_t pkt, std::size_t payload_size)
 {
 	if (payload_size == 0) {
 		packet::ptr_t p;
@@ -408,37 +357,20 @@ void indirect_credit::receive_payload(connection::ptr_t con, packet::ptr_t pkt, 
 		return;
 	}
 
-	switch (pkt->content_status())
-	{
-	case packet::content_attached:
-		con->receive_payload(payload_size, boost::protect(boost::bind(&indirect_credit::credits_received, this, con, pkt, _1)));
-		break;
-	case packet::content_requested:
-		con->receive_payload(payload_size, boost::protect(boost::bind(&indirect_credit::request_received, this, con, pkt, _1)));
-		break;
-	case packet::content_failure:
-		con->receive_payload(payload_size, boost::protect(boost::bind(&indirect_credit::failure_received, this, con, pkt, _1)));
-		break;
-	default:
-		{
-			packet::ptr_t p;
-			node_.packet_received(con, p);
-		}
-		break;
-	}
+	con->receive_payload(payload_size, boost::protect(boost::bind(&indirect_credit::credits_received, this, con, pkt, _1)));
 }
 
 void indirect_credit::to_content_location_failure(packet::ptr_t pkt)
 {
 	if (store_.have_credits_from(pkt->destination()))
-		pkt->to_reply(packet::content_attached, new payload_credits<credit_store>(store_));
+		pkt->to_reply(packet::content_attached, boost::make_shared<payload_credits<credit_store> >(store_));
 	else
-		pkt->to_reply(packet::content_failure, new payload_credits_failure());
+		pkt->to_reply(packet::content_failure, boost::make_shared<payload_failure>(0));
 }
 
 void indirect_credit::request_from_location_failure(packet::ptr_t pkt)
 {
-	pkt->to_reply(packet::content_requested, new payload_credits_request());
+	pkt->to_reply(packet::content_requested, boost::make_shared<payload_request>(0));
 }
 
 void indirect_credit::snoop_packet_payload(packet::ptr_t pkt)
@@ -447,7 +379,7 @@ void indirect_credit::snoop_packet_payload(packet::ptr_t pkt)
 	{
 		case packet::content_requested:
 			if (pkt->destination() == node_.id())
-				pkt->to_reply(packet::content_attached, new payload_credits<known_peers>(node_.get_known_peers()));
+				pkt->to_reply(packet::content_attached, boost::make_shared<payload_credits<known_peers> >(node_.get_known_peers()));
 			break;
 	}
 }
@@ -455,17 +387,5 @@ void indirect_credit::snoop_packet_payload(packet::ptr_t pkt)
 void indirect_credit::credits_received(connection::ptr_t con, packet::ptr_t pkt, const_buffer buf)
 {
 	payload_credits<credit_store>::parse(pkt, buf, store_);
-	node_.packet_received(con, pkt);
-}
-
-void indirect_credit::request_received(connection::ptr_t con, packet::ptr_t pkt, const_buffer buf)
-{
-	payload_credits_request::parse(pkt, buf);
-	node_.packet_received(con, pkt);
-}
-
-void indirect_credit::failure_received(connection::ptr_t con, packet::ptr_t pkt, const_buffer buf)
-{
-	payload_credits_failure::parse(pkt, buf);
 	node_.packet_received(con, pkt);
 }

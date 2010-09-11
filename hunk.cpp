@@ -52,6 +52,19 @@ static const boost::posix_time::time_duration flush_threashold = boost::posic_ti
 
 using namespace boost::filesystem;
 
+struct stored_content_key
+{
+	network_key publisher;
+	boost::uint8_t name[];
+};
+
+struct stored_content_metadata
+{
+	boost::posix_time::ptime last_access;
+	boost::posix_time::ptime stored;
+	std::size_t size;
+};
+
 std::string mapped_content::temp_path(const std::string& path, std::size_t size)
 {
 	boost::filesystem::path p(path);
@@ -69,32 +82,47 @@ std::string mapped_content::temp_path(const std::string& path, std::size_t size)
 	return p.string();
 }
 
-namespace detail
+void content_store::load_contents(boost::filesystem::path dir_path, signature_scheme_id pid, local_node& node)
 {
+	if (!boost::filesystem::exists(dir_path)) return;
 
-stored_content content_store_base::do_load_content(directory_iterator file, protocol_t pid, local_node& node)
-{
-	network_key key(file->filename());
-	DLOG(INFO) << "loading content " << file->path().string().c_str();
-#ifdef BOOST_WINDOWS
-	HANDLE file_hnd = ::CreateFileA(file->path().string().c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-	FILETIME stored, accessed;
-	hunk_descriptor_t hunk_desc = node.load_existing_hunk(pid, key, ::GetFileSize(file_hnd, NULL));
-	::GetFileTime(file_hnd, &stored, &accessed, NULL);
-	hunk_desc->stored = boost::posix_time::from_ftime<boost::posix_time::ptime>(stored);
-	hunk_desc->last_access = boost::posix_time::from_ftime<boost::posix_time::ptime>(accessed);
-	::CloseHandle(file_hnd);
-#else
-	// TODO: POSIX version
-#endif
-	return stored_content(hunk_desc);
+	Dbc* cursor;
+	db_.cursor(NULL, &cursor, 0);
+
+	Dbt key, data;
+
+/*	known_peer::packed peer_data;
+	data.set_flags(DB_DBT_USERMEM | DB_DBT_PARTIAL);
+	data.set_data(&peer_data);
+	data.set_size(sizeof(peer_data));
+*/
+
+	while (cursor->get(&key, &data, DB_NEXT) == 0) {
+		stored_content_key* content_id(reinterpret_cast<stored_content_key*>(key.get_data()));
+		content_identifier cid(content_id->publisher, content_name(const_buffer(content_id->name, key.get_dlen() - sizeof(network_key))));
+
+		stored_content_metadata* metadata(reinterpret_cast<stored_content_metadata*>(data.get_data()));
+
+		DLOG(INFO) << "loading content " << std::string(content_id->publisher);
+
+		hunk_descriptor_t hunk_desc = node.load_existing_hunk(pid, cid, metadata->size);
+		hunk_desc->stored = metadata->stored;
+		hunk_desc->last_access = metadata->last_access;
+
+		stored_contents_.insert(std::make_pair(cid, stored_content(hunk_desc)));
+	}
+
+	cursor->close();
 }
 
-void content_store_base::do_flush(stored_content& stored)
+void content_store::do_flush(stored_content& stored)
 {
 	boost::posix_time::ptime now = boost::posix_time::second_clock::universal_time();
 	if (now - stored.desc->last_access > flush_threashold) {
-		std::string path = content_path(stored.desc->id);
+		std::vector<boost::uint8_t> key_buf;
+		generate_db_key(stored.desc->id, key_buf);
+
+		std::string path = content_path(buffer(key_buf));
 #ifdef BOOST_WINDOWS
 		HANDLE file_hnd = ::CreateFileA(path.c_str(), FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 		LARGE_INTEGER access_i;
@@ -114,12 +142,12 @@ void content_store_base::do_flush(stored_content& stored)
 	}
 }
 
-mapped_content::ptr content_store_base::get_temp(std::size_t size)
+mapped_content::ptr content_store::get_temp(std::size_t size)
 {
 	return mapped_content::ptr(new mapped_content(path_, size, true));
 }
 
-const_payload_buffer_ptr content_store_base::do_get(stored_content& stored)
+const_payload_buffer_ptr content_store::do_get(stored_content& stored)
 {
 	stored.desc->last_access = boost::posix_time::second_clock::universal_time();
 
@@ -128,7 +156,10 @@ const_payload_buffer_ptr content_store_base::do_get(stored_content& stored)
 	if (content)
 		return content;
 	else {
-		std::string path = content_path(stored.desc->id);
+		std::vector<boost::uint8_t> key_buf;
+		generate_db_key(stored.desc->id, key_buf);
+
+		std::string path = content_path(buffer(key_buf));
 /*		std::size_t content_size;
 #ifdef BOOST_WINDOWS
 		HANDLE file_hnd = ::CreateFileA(path.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -145,13 +176,39 @@ const_payload_buffer_ptr content_store_base::do_get(stored_content& stored)
 	}
 }
 
-mapped_content::const_ptr content_store_base::do_put(stored_content& stored, std::vector<const_buffer> content)
+mapped_content::const_ptr content_store::put(hunk_descriptor_t desc, std::vector<const_buffer> content)
 {
-	std::string path = content_path(stored.desc->id, true);
-
 	std::size_t content_size = 0;
 	for (std::vector<const_buffer>::iterator buf = content.begin(); buf != content.end(); ++buf)
 		content_size += buffer_size(*buf);
+
+	std::vector<boost::uint8_t> key_buf;
+	generate_db_key(desc->id, key_buf);
+
+	iterator stored_contents = stored_contents_.find(desc->id);
+
+	if (stored_contents != stored_contents_.end()) {
+		// On POSIX we should be using the rename to overwrite the existing file
+		// But windows cannot handle that, so don't bother for now
+		// This will only become an issue when we start doing multi-threading/processing
+		unlink_storage(stored_contents->second);
+	}
+	else {
+		stored_content_metadata data_struct;
+		data_struct.stored = data_struct.last_access = boost::posix_time::second_clock::universal_time();
+		data_struct.size = content_size;
+
+		Dbt key(&key_buf[0], key_buf.size());
+		Dbt data(&data_struct, sizeof(data_struct));
+
+		db_.put(NULL, &key, &data, 0);
+
+		stored_contents = stored_contents_.insert(std::make_pair(desc->id, stored_content(desc))).first;
+	}
+
+	stored_contents->second.desc = desc;
+
+	std::string path = content_path(buffer(key_buf), true);
 
 	{
 #ifdef BOOST_WINDOWS
@@ -173,12 +230,38 @@ mapped_content::const_ptr content_store_base::do_put(stored_content& stored, std
 	}
 
 	mapped_content::ptr new_mapping(new mapped_content(path, content_size));
-	stored.content = new_mapping;
+	stored_contents->second.content = new_mapping;
 	return new_mapping;
 }
 
-mapped_content::const_ptr content_store_base::do_put(stored_content& stored, mapped_content::ptr content)
+mapped_content::const_ptr content_store::put(hunk_descriptor_t desc, mapped_content::ptr content)
 {
+	std::vector<boost::uint8_t> key_buf;
+	generate_db_key(desc->id, key_buf);
+
+	iterator stored_contents = stored_contents_.find(desc->id);
+
+	if (stored_contents != stored_contents_.end()) {
+		// On POSIX we should be using the rename to overwrite the existing file
+		// But windows cannot handle that, so don't bother for now
+		// This will only become an issue when we start doing multi-threading/processing
+		unlink_storage(stored_contents->second);
+	}
+	else {
+		stored_content_metadata data_struct;
+		data_struct.stored = data_struct.last_access = boost::posix_time::second_clock::universal_time();
+		data_struct.size = desc->size;
+
+		Dbt key(&key_buf[0], key_buf.size());
+		Dbt data(&data_struct, sizeof(data_struct));
+
+		db_.put(NULL, &key, &data, 0);
+
+		stored_contents = stored_contents_.insert(std::make_pair(desc->id, stored_content(desc))).first;
+	}
+
+	stored_contents->second.desc = desc;
+
 	content->deleted = false;
 
 	std::stringstream temp_path;
@@ -188,16 +271,30 @@ mapped_content::const_ptr content_store_base::do_put(stored_content& stored, map
 	// content *should* be unique at this point, should probably add a check for this...
 	content.reset();
 	
-	std::string path = content_path(stored.desc->id, true);
+	std::string path = content_path(buffer(key_buf), true);
 
 	std::rename(temp_path.str().c_str(), path.c_str());
 
-	mapped_content::ptr new_mapping(new mapped_content(path, stored.desc->size));
-	stored.content = new_mapping;
+	mapped_content::ptr new_mapping(new mapped_content(path, stored_contents->second.desc->size));
+	stored_contents->second.content = new_mapping;
 	return new_mapping;
 }
 
-void content_store_base::unlink_storage(stored_content& stored)
+void content_store::unlink(const content_identifier& key)
+{
+	iterator stored_contents = stored_contents_.find(key);
+
+	std::vector<boost::uint8_t> key_buf;
+	generate_db_key(stored_contents->first, key_buf);
+	Dbt dbkey(&key_buf[0], key_buf.size());
+
+	db_.del(NULL, &dbkey, 0);
+
+	unlink_storage(stored_contents->second);
+	stored_contents_.erase(stored_contents);
+}
+
+void content_store::unlink_storage(stored_content& stored)
 {
 #ifdef BOOST_WINDOWS
 	// On Windows we must check for an active mapping and flag it if one exists
@@ -215,16 +312,27 @@ void content_store_base::unlink_storage(stored_content& stored)
 		::MoveFileA(content->mapping.get_name(), ss.str().c_str());
 	}
 	else {
-		DLOG(INFO) << "deleteing content " << content_path(stored.desc->id).c_str();
-		::DeleteFileA(content_path(stored.desc->id).c_str());
+		std::vector<boost::uint8_t> key_buf;
+		generate_db_key(stored.desc->id, key_buf);
+		DLOG(INFO) << "deleteing content " << content_path(buffer(key_buf)).c_str();
+		::DeleteFileA(content_path(buffer(key_buf)).c_str());
 	}
 #else
 	::unlink(content_path(content->first).c_str());
 #endif
 }
 
-std::string content_store_base::content_path(const network_key& key, bool create_dirs) const
+void content_store::generate_db_key(const content_identifier& id, std::vector<boost::uint8_t>& buf)
 {
+	buf.resize(sizeof(stored_content_key) + id.name.serialize(mutable_buffer()));
+	stored_content_key* key_struct = reinterpret_cast<stored_content_key*>(&buf[0]);
+	key_struct->publisher = id.publisher;
+	id.name.serialize(mutable_buffer(key_struct->name, buf.size() - sizeof(stored_content_key)));
+}
+
+std::string content_store::content_path(const_buffer db_key, bool create_dirs) const
+{
+	network_key key(db_key);
 	std::string key_str = key;
 	boost::filesystem::path path(path_);
 	path /= key_str.substr(0, 2);
@@ -234,4 +342,3 @@ std::string content_store_base::content_path(const network_key& key, bool create
 	return path.string();
 }
 
-} // namespace detail

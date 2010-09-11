@@ -30,35 +30,32 @@
 // files in the program, then also delete it here.
 //
 // Contact:  Steven Siloti <ssiloti@gmail.com>
+#ifndef CONTENT_HPP
+#define CONTENT_HPP
 
-#include "protocols/non_authoritative.hpp"
-#include "node.hpp"
+#include "key.hpp"
+#include "name.hpp"
 
-non_authoritative::non_authoritative(local_node& node)
-	: user_content(node, protocol_id), stored_hunks_(node.config().content_store_path() + "/non_authoritative", protocol_id, node)
+struct content_identifier
 {
+	content_identifier() {}
+	content_identifier(const network_key& p, const content_name n = content_name()) : publisher(p), name(n) {}
+
+	network_key publisher;
+	content_name name;
+};
+
+inline bool operator<(const content_identifier& l, const content_identifier& r)
+{
+	if (l.publisher == r.publisher)
+		return l.name < r.name;
+	else
+		return l.publisher < r.publisher;
 }
 
-const_payload_buffer_ptr non_authoritative::get_content(const network_key& key)
+inline bool operator==(const content_identifier& l, const content_identifier& r)
 {
-	return stored_hunks_.get(key);
+	return l.publisher == r.publisher && l.name == r.name;
 }
 
-network_key non_authoritative::content_id(const_payload_buffer_ptr content)
-{
-	return network_key(content->get());
-}
-
-void non_authoritative::store_content(hunk_descriptor_t desc, const_payload_buffer_ptr content)
-{
-	stored_hunks_.put(desc, std::vector<const_buffer>(1, content->get()));
-
-#ifdef SIMULATION
-	sim.stored_non_authoritative_hunk(desc->id);
 #endif
-}
-
-void non_authoritative::insert_hunk(const_payload_buffer_ptr hunk)
-{
-	new_content_store(hunk);
-}

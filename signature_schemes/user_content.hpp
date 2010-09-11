@@ -36,7 +36,7 @@
 
 #include <glog/logging.h>
 
-#include "protocol.hpp"
+#include "signature_scheme.hpp"
 #include "packet.hpp"
 #include "fragment.hpp"
 #include "core.hpp"
@@ -46,54 +46,25 @@
 
 class local_node;
 
-struct content_sources : boost::enable_shared_from_this<content_sources>
-{
-	typedef boost::shared_ptr<content_sources> ptr_t;
-
-	struct source
-	{
-		source() : stored(boost::posix_time::second_clock::universal_time()), active_request_count(0) {}
-		source(ip::tcp::endpoint ep) : ep(ep), stored(boost::posix_time::second_clock::universal_time()) {}
-		boost::posix_time::ptime stored;
-		ip::tcp::endpoint ep;
-		unsigned int active_request_count;
-	};
-
-	struct ep_cmp
-	{
-		bool operator()(const ip::tcp::endpoint& l, const ip::tcp::endpoint& r) const { if (l.address() == r.address()) return l.port() < r.port(); return l.address() < r.address(); }
-	};
-
-	typedef std::map<network_key, source> sources_t;
-
-	content_sources(std::size_t s) : size(s), last_stat_source_count(0) {}
-
-	sendable_payload* get_payload();
-
-	sources_t sources;
-	boost::uint32_t size;
-	int last_stat_source_count; // the most recent source count which was registered with the sources_per_hunk stats
-};
-
-class content_request
+class user_content_request
 {
 public:
 	typedef boost::function<void(const_payload_buffer_ptr)> keyed_handler_t;
 
-	content_request(const keyed_handler_t& handler) : receiving_content_(false) { add_handler(handler); }
-	content_request() : receiving_content_(false) {}
+	user_content_request(const keyed_handler_t& handler) : receiving_content_(false), direct_request_pending_(false) { add_handler(handler); }
+	user_content_request() : receiving_content_(false), direct_request_pending_(false) {}
 
 	bool snoop_packet(local_node& node, packet::ptr_t pkt);
 	const_payload_buffer_ptr snoop_fragment(local_node& node, const network_key& src, frame_fragment::ptr_t frag);
 	void add_handler(const keyed_handler_t& handler) { handlers_.push_back(handler); }
 	bool timeout(local_node& node, packet::ptr_t pkt);
 
-	void initiate_request(protocol_t protocol, const network_key& key, local_node& node, std::size_t content_size);
+	void initiate_request(signature_scheme_id sig, const content_identifier& key, local_node& node, content_size_t content_size);
 
 	framented_content::fragment_buffer get_fragment_buffer(std::size_t offset, std::size_t size);
 
 private:
-	std::size_t content_size_;
+	content_size_t content_size_;
 	std::vector<keyed_handler_t> handlers_;
 	boost::shared_ptr<content_sources> sources_;
 	bool direct_request_pending_;
@@ -103,66 +74,57 @@ private:
 	bool receiving_content_;
 };
 
-class user_content : public network_protocol
+class user_content : public fragmented_protocol
 {
+	typedef std::map<content_identifier, boost::shared_ptr<crumb> > crumbs_t;
+
 public:
-	user_content(local_node& node, protocol_t p);
+	virtual void prune_hunk(const content_identifier& id) {}
 
-	virtual protocol_t id() { return protocol_; }
-	virtual void prune_hunk(const network_key& id) {}
-
-	virtual void receive_payload(connection::ptr_t con, packet::ptr_t pkt, std::size_t payload_size);
-	void incoming_fragment(connection::ptr_t con, frame_fragment::ptr_t frag, std::size_t payload_size);
+	virtual void receive_attached_content(connection::ptr_t con, packet::ptr_t pkt, std::size_t payload_size);
+	virtual void incoming_fragment(connection::ptr_t con, frame_fragment::ptr_t frag, std::size_t payload_size);
 
 	virtual payload_buffer_ptr get_payload_buffer(std::size_t size) { return payload_buffer_ptr(); }
 	framented_content::fragment_buffer get_fragment_buffer(frame_fragment::ptr_t frag);
-	content_sources::ptr_t get_content_sources(network_key id, std::size_t size);
 
-	void start_vacume();
-
-	void new_content_request(const network_key& key, std::size_t content_size = 0, const content_request::keyed_handler_t& handler = content_request::keyed_handler_t());
-	void new_content_store(const_payload_buffer_ptr hunk);
+	void new_content_request(const content_identifier& key, content_size_t content_size = 0, const user_content_request::keyed_handler_t& handler = user_content_request::keyed_handler_t());
+	void new_content_store(content_identifier cid, const_payload_buffer_ptr hunk);
 
 	virtual void to_content_location_failure(packet::ptr_t pkt);
 	virtual void request_from_location_failure(packet::ptr_t pkt);
 
 	void content_fragment_received(connection::ptr_t con, frame_fragment::ptr_t frag);
 
-	void snoop_fragment(const network_key& src, frame_fragment::ptr_t frag);
+	virtual void snoop_fragment(const network_key& src, frame_fragment::ptr_t frag);
 
-	virtual void shutdown() { network_protocol::shutdown(); vacume_sources_.cancel(); response_handlers_.clear(); }
+	virtual void shutdown() { signature_scheme::shutdown(); vacume_sources_.cancel(); response_handlers_.clear(); }
 
 protected:
+	user_content(local_node& node, signature_scheme_id p);
+
 	virtual void snoop_packet_payload(packet::ptr_t pkt);
 
-	virtual const_payload_buffer_ptr get_content(const network_key& key) { return const_payload_buffer_ptr(); }
+	virtual const_payload_buffer_ptr get_content(const content_identifier& key) { return const_payload_buffer_ptr(); }
 	virtual void store_content(hunk_descriptor_t desc, const_payload_buffer_ptr content) {}
-	virtual network_key content_id(const_payload_buffer_ptr content) { return network_key(); }
+	virtual content_identifier content_id(const_payload_buffer_ptr content) { return content_identifier(); }
 
 private:
 	struct response_handler
 	{
 		response_handler(boost::asio::io_service& ios)
 			: timeout(ios) { timeout.expires_from_now(boost::posix_time::seconds(5)); }
-		content_request request;
+		user_content_request request;
 		boost::asio::deadline_timer timeout;
 	};
 
-	typedef std::map<network_key, boost::shared_ptr<response_handler> > response_handlers_t;
-	typedef std::map<network_key, content_sources::ptr_t> content_sources_t;
+	typedef std::map<content_identifier, boost::shared_ptr<response_handler> > response_handlers_t;
 
-	void remove_response_handler(network_key key, const boost::system::error_code& error);
+	void remove_response_handler(content_identifier key, const boost::system::error_code& error);
 	void vacume_sources(const boost::system::error_code& error = boost::system::error_code());
 
 	void content_received(connection::ptr_t con, packet::ptr_t pkt);
-	void sources_received(connection::ptr_t con, packet::ptr_t pkt, const_buffer buf);
-	void request_received(connection::ptr_t con, packet::ptr_t pkt, const_buffer buf);
-	void failure_received(connection::ptr_t con, packet::ptr_t pkt, const_buffer buf);
 
 	response_handlers_t response_handlers_;
-	content_sources_t content_sources_;
-	boost::asio::deadline_timer vacume_sources_;
-	protocol_t protocol_;
 };
 
 #endif

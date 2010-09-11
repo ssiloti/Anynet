@@ -34,6 +34,8 @@
 #ifndef CORE_HPP
 #define CORE_HPP
 
+#pragma warning (disable : 4200)
+
 #include <glog/logging.h>
 
 #include "link.hpp"
@@ -45,7 +47,17 @@
 #include <vector>
 #include <set>
 
-typedef boost::uint8_t protocol_t;
+typedef boost::uint16_t signature_scheme_id;
+typedef boost::uint64_t content_size_t;
+
+enum defined_signature_schemes
+{
+	signature_sha256            = 0,
+	signature_sha1_rsa          = 1,
+	signature_sha1_rsa_x509     = 2,
+	signature_sha1_rsa_credits  = 3,
+	signature_sha1_sha2         = 4,
+};
 
 class network_key;
 
@@ -112,6 +124,7 @@ private:
 };
 
 extern const network_key key_max;
+extern const network_key key_min;
 
 class rolling_stats
 {

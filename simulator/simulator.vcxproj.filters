@@ -13,15 +13,15 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
-    <Filter Include="Header Files\Protocols">
+    <Filter Include="Header Files\Signature">
       <UniqueIdentifier>{a4477119-ce8b-45a6-90fb-3a0c90f09c72}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\Protocols">
+    <Filter Include="Source Files\Signature">
       <UniqueIdentifier>{9cf2e354-8efc-498e-9ba7-77c70de25ccf}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\protocol.hpp">
+    <ClInclude Include="..\signature_scheme.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\authority.hpp">
@@ -63,14 +63,14 @@
     <ClInclude Include="simulator.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\protocols\user_content.hpp">
-      <Filter>Header Files\Protocols</Filter>
+    <ClInclude Include="..\signature_schemes\user_content.hpp">
+      <Filter>Header Files\Signature</Filter>
     </ClInclude>
-    <ClInclude Include="..\protocols\indirect_credit.hpp">
-      <Filter>Header Files\Protocols</Filter>
+    <ClInclude Include="..\signature_schemes\indirect_credit.hpp">
+      <Filter>Header Files\Signature</Filter>
     </ClInclude>
-    <ClInclude Include="..\protocols\non_authoritative.hpp">
-      <Filter>Header Files\Protocols</Filter>
+    <ClInclude Include="..\signature_schemes\non_authoritative.hpp">
+      <Filter>Header Files\Signature</Filter>
     </ClInclude>
     <ClInclude Include="..\hunk.hpp">
       <Filter>Header Files</Filter>
@@ -78,9 +78,15 @@
     <ClInclude Include="..\key.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="..\name.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\content.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="..\protocol.cpp">
+    <ClCompile Include="..\signature_scheme.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\authority.cpp">
@@ -119,14 +125,14 @@
     <ClCompile Include="simulator.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\protocols\user_content.cpp">
-      <Filter>Source Files\Protocols</Filter>
+    <ClCompile Include="..\signature_schemes\user_content.cpp">
+      <Filter>Source Files\Signature</Filter>
     </ClCompile>
-    <ClCompile Include="..\protocols\indirect_credit.cpp">
-      <Filter>Source Files\Protocols</Filter>
+    <ClCompile Include="..\signature_schemes\indirect_credit.cpp">
+      <Filter>Source Files\Signature</Filter>
     </ClCompile>
-    <ClCompile Include="..\non_authoritative.cpp">
-      <Filter>Source Files\Protocols</Filter>
+    <ClCompile Include="..\signature_schemes\non_authoritative.cpp">
+      <Filter>Source Files\Signature</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

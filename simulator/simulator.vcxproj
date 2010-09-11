@@ -84,6 +84,7 @@
   <ItemGroup>
     <ClInclude Include="..\authority.hpp" />
     <ClInclude Include="..\connection.hpp" />
+    <ClInclude Include="..\content.hpp" />
     <ClInclude Include="..\core.hpp" />
     <ClInclude Include="..\field_utils.hpp" />
     <ClInclude Include="..\fragment.hpp" />
@@ -91,13 +92,14 @@
     <ClInclude Include="..\key.hpp" />
     <ClInclude Include="..\known_peers.hpp" />
     <ClInclude Include="..\link.hpp" />
+    <ClInclude Include="..\name.hpp" />
     <ClInclude Include="..\node.hpp" />
     <ClInclude Include="..\packet.hpp" />
     <ClInclude Include="..\peer_cache.hpp" />
-    <ClInclude Include="..\protocol.hpp" />
-    <ClInclude Include="..\protocols\indirect_credit.hpp" />
-    <ClInclude Include="..\protocols\non_authoritative.hpp" />
-    <ClInclude Include="..\protocols\user_content.hpp" />
+    <ClInclude Include="..\signature_scheme.hpp" />
+    <ClInclude Include="..\signature_schemes\indirect_credit.hpp" />
+    <ClInclude Include="..\signature_schemes\non_authoritative.hpp" />
+    <ClInclude Include="..\signature_schemes\user_content.hpp" />
     <ClInclude Include="config.hpp" />
     <ClInclude Include="simulator.hpp" />
     <ClInclude Include="traffic_generator.hpp" />
@@ -110,12 +112,12 @@
     <ClCompile Include="..\hunk.cpp" />
     <ClCompile Include="..\known_peers.cpp" />
     <ClCompile Include="..\node.cpp" />
-    <ClCompile Include="..\non_authoritative.cpp" />
+    <ClCompile Include="..\signature_schemes\non_authoritative.cpp" />
     <ClCompile Include="..\packet.cpp" />
     <ClCompile Include="..\peer_cache.cpp" />
-    <ClCompile Include="..\protocol.cpp" />
-    <ClCompile Include="..\protocols\indirect_credit.cpp" />
-    <ClCompile Include="..\protocols\user_content.cpp" />
+    <ClCompile Include="..\signature_scheme.cpp" />
+    <ClCompile Include="..\signature_schemes\indirect_credit.cpp" />
+    <ClCompile Include="..\signature_schemes\user_content.cpp" />
     <ClCompile Include="config.cpp" />
     <ClCompile Include="simulator.cpp" />
     <ClCompile Include="traffic_generator.cpp" />

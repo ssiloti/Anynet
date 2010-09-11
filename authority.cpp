@@ -56,7 +56,7 @@ bool authority::verify(const_buffer message, const_buffer signature) const
 	                  buffer_size(message),
 	                  buffer_cast<const unsigned char*>(signature),
 	                  buffer_size(signature),
-	                  key_);
+	                  key_) != 0;
 }
 
 author::author(const std::string& cert_file)

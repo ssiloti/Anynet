@@ -37,7 +37,7 @@
 #include <glog/logging.h>
 
 #include "hunk.hpp"
-#include "protocols/user_content.hpp"
+#include "signature_schemes/user_content.hpp"
 #include "key.hpp"
 #include "node.hpp"
 #include <boost/smart_ptr.hpp>
@@ -50,7 +50,23 @@
 class non_authoritative : public user_content
 {
 public:
-	static const protocol_t protocol_id = 1;
+	static const signature_scheme_id protocol_id = signature_sha256;
+
+	struct insert_buffer : public mutable_shared_buffer
+	{
+		friend class non_authoritative;
+
+		insert_buffer(mapped_content::ptr b);
+
+		void chunk_size(std::size_t s);
+		std::size_t chunk_size() const;
+
+		virtual mutable_buffer get();
+		virtual const_buffer get() const;
+
+	private:
+		mapped_content::ptr backing;
+	};
 
 	static void create(local_node& node)
 	{
@@ -59,35 +75,35 @@ public:
 		ptr->start_vacume();
 	}
 
-	void insert_hunk(const_payload_buffer_ptr hunk);
+	insert_buffer get_insertion_buffer(std::size_t size);
+	content_identifier insert_hunk(insert_buffer hunk);
 
 	template <typename Handler>
-	void retrieve_hunk(const network_key& key, Handler handler)
+	void retrieve_hunk(const content_identifier& key, Handler handler)
 	{
 		new_content_request(key, 0, boost::bind(&non_authoritative::hunk_retrieved<Handler>, handler, _1));
 	}
 
-	virtual protocol_t id() { return protocol_id; }
-	virtual const_payload_buffer_ptr get_content(const network_key& key);
+	virtual const_payload_buffer_ptr get_content(const content_identifier& key);
 	virtual void store_content(hunk_descriptor_t desc, const_payload_buffer_ptr content);
-	virtual network_key content_id(const_payload_buffer_ptr content);
+	virtual content_identifier content_id(const_payload_buffer_ptr content);
 
 	virtual payload_buffer_ptr get_payload_buffer(std::size_t size)
 	{
 		return stored_hunks_.get_temp(size);
 	}
 
-	virtual void prune_hunk(const network_key& id)
+	virtual void prune_hunk(const content_identifier& id)
 	{
-		stored_hunks_.unlink(id);
+		stored_hunks_.unlink(content_identifier(id));
 	}
 
 	~non_authoritative()
 	{
 #ifdef SIMULATION
 //		assert(!sim.node_created(node_id));
-		for (content_store<>::const_iterator hunk = stored_hunks_.begin(); hunk != stored_hunks_.end(); ) {
-			network_key hid = hunk->first;
+		for (content_store::const_iterator hunk = stored_hunks_.begin(); hunk != stored_hunks_.end(); ) {
+			content_identifier hid = hunk->first;
 			++hunk;
 			stored_hunks_.unlink(hid);
 		}
@@ -110,7 +126,7 @@ private:
 		handler(content);
 	}
 
-	content_store<> stored_hunks_;
+	content_store stored_hunks_;
 };
 
 #endif

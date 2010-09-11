@@ -37,7 +37,7 @@
 #include <glog/logging.h>
 
 #include "link.hpp"
-#include "key.hpp"
+#include "content.hpp"
 #include "core.hpp"
 #include <boost/asio/read.hpp>
 #include <boost/asio/write.hpp>
@@ -54,7 +54,9 @@ class packet;
 class sendable_payload
 {
 public:
-	virtual std::size_t content_size() const
+	typedef boost::shared_ptr<sendable_payload> ptr_t;
+
+	virtual content_size_t content_size() const
 	{
 		return 0;
 	}
@@ -68,7 +70,7 @@ class packet : public boost::enable_shared_from_this<packet>, public content_fra
 public:
 	typedef boost::shared_ptr<packet> ptr_t;
 	typedef boost::shared_ptr<const packet> const_ptr_t;
-	typedef std::auto_ptr<const sendable_payload> payload_ptr_t;
+	typedef boost::shared_ptr<const sendable_payload> payload_ptr_t;
 
 	enum content_status_t
 	{
@@ -80,13 +82,13 @@ public:
 
 	packet() : direct_(false) {}
 
-	void to_reply(content_status_t status, sendable_payload* payload = NULL)
+	void to_reply(content_status_t status, payload_ptr_t payload = payload_ptr_t())
 	{
 		network_key temp = source();
 		source(destination());
 		destination(temp);
 		content_status(status);
-		payload_ = payload_ptr_t(payload);
+		payload_ = payload;
 	}
 
 	virtual std::vector<const_buffer> serialize(std::size_t threshold, mutable_buffer scratch);
@@ -108,8 +110,8 @@ public:
 			                                    placeholders::bytes_transferred));
 	}
 
-	protocol_t protocol() const { return protocol_; }
-	void protocol(protocol_t p) { protocol_ = p; }
+	signature_scheme_id sig() const { return sig_scheme_; }
+	void sig(signature_scheme_id p) { sig_scheme_ = p; }
 
 	content_status_t content_status() const { return content_status_; }
 	void content_status(content_status_t s) { content_status_ = s; }
@@ -120,20 +122,44 @@ public:
 	const network_key& destination() const { return destination_; };
 	void destination(const network_key& d) { destination_ = d; }
 
+	const content_name& name() const { return name_; }
+	void name(const content_name& n) { name_ = n; }
+
+	const network_key& requester() const
+	{
+		if (content_status() == content_requested)
+			return source();
+		else
+			return destination();
+	}
+
+	const network_key& publisher() const
+	{
+		if (content_status() == content_requested)
+			return destination();
+		else
+			return source();
+	}
+
+	content_identifier content_id() const
+	{
+		return content_identifier(publisher(), name());
+	}
+
 	void mark_direct() { direct_ = true; }
 	bool is_direct() const { return direct_; }
 
 	const sendable_payload* payload() const { return payload_.get(); }
 	template <typename Payload>
-	const Payload* payload_as() const { return dynamic_cast<const Payload*>(payload_.get()); }
-	void payload(sendable_payload* p) { payload_ = std::auto_ptr<sendable_payload>(p); }
+	boost::shared_ptr<const Payload> payload_as() const { return boost::dynamic_pointer_cast<const Payload>(payload_); }
+	void payload(payload_ptr_t p) { payload_ = p; }
 
 protected:
 	static std::size_t header_size();
 
 private:
 	std::size_t serialize_header(mutable_buffer buf);
-	std::size_t parse_header(const_buffer buf);
+	std::pair<content_size_t, unsigned> parse_header(const_buffer buf);
 
 	template <typename Handler>
 	void header_received(net_link& link,
@@ -142,7 +168,7 @@ private:
 	                     std::size_t bytes_transferred)
 	{
 		if (error || !link.socket.lowest_layer().is_open()) {
-			DLOG(INFO) << "Error receiving packet header" << error;
+			DLOG(INFO) << "Error receiving packet header " << error;
 			ptr_t p;
 			handler(p, bytes_transferred);
 			return;
@@ -150,21 +176,46 @@ private:
 
 		link.received(bytes_transferred);
 
-		std::size_t payload_size = parse_header(link.received_buffer());
+		std::pair<content_size_t, unsigned> name_payload_size = parse_header(link.received_buffer());
 //		DLOG(INFO) << '+' << bytes_transferred - header_size() << ',' << link.valid_recv_bytes;
 
 //		DLOG(INFO) << "Received packet header dest=" << std::string(destination());
 
 		link.consume_receive_buffer(header_size());
+
+		name_.receive(name_payload_size.second,
+		               link,
+		               boost::protect(boost::bind(&packet::name_received<Handler>,
+		                                          shared_from_this(),
+		                                          name_payload_size.first,
+		                                          boost::ref(link),
+		                                          handler,
+		                                          placeholders::error)));
+	}
+
+	template <typename Handler>
+	void name_received(content_size_t payload_size,
+	                   net_link& link,
+	                   Handler handler,
+	                   const boost::system::error_code& error)
+	{
+		if (error || !link.socket.lowest_layer().is_open()) {
+			DLOG(INFO) << "Error receiving content name " << error;
+			ptr_t p;
+			handler(p, payload_size);
+			return;
+		}
+
 		ptr_t p(shared_from_this());
 		handler(p, payload_size);
 	}
 
 	bool direct_;
-	protocol_t protocol_;
+	signature_scheme_id sig_scheme_;
 	content_status_t content_status_;
 	network_key source_;
 	network_key destination_;
+	content_name name_;
 protected:
 	payload_ptr_t payload_;
 };

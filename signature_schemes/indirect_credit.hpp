@@ -36,7 +36,7 @@
 
 #include "known_peers.hpp"
 #include "authority.hpp"
-#include "protocol.hpp"
+#include "signature_scheme.hpp"
 #include <db_cxx.h>
 #include <boost/date_time/posix_time/posix_time_types.hpp>
 #include <map>
@@ -162,10 +162,10 @@ private:
 	credits_index_t credit_index_;
 };
 
-class indirect_credit : public network_protocol
+class indirect_credit : public signature_scheme
 {
 public:
-	static const protocol_t protocol_id = 1;
+	static const signature_scheme_id protocol_id = signature_sha1_rsa_credits;
 
 	static void create(local_node& node)
 	{
@@ -174,9 +174,7 @@ public:
 		//ptr->start_vacume();
 	}
 
-	virtual protocol_t id() { return protocol_id; }
-
-	virtual void receive_payload(connection::ptr_t con, packet::ptr_t pkt, std::size_t payload_size);
+	virtual void receive_attached_content(connection::ptr_t con, packet::ptr_t pkt, std::size_t payload_size);
 
 	virtual void to_content_location_failure(packet::ptr_t pkt);
 	virtual void request_from_location_failure(packet::ptr_t pkt);
@@ -190,8 +188,6 @@ private:
 	indirect_credit(local_node& node);
 
 	void credits_received(connection::ptr_t con, packet::ptr_t pkt, const_buffer buf);
-	void request_received(connection::ptr_t con, packet::ptr_t pkt, const_buffer buf);
-	void failure_received(connection::ptr_t con, packet::ptr_t pkt, const_buffer buf);
 
 	credit_store store_;
 };

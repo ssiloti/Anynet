@@ -84,7 +84,7 @@ inline void u32(boost::uint8_t b[4], boost::uint32_t i) { b[0] = i >> 24; b[1] =
 inline void u64(boost::uint8_t b[8], boost::uint64_t i)
 {
 	for (int l = 0; l < 8; ++l)
-		b[l] = i >> (7 - l) & 0xFF;
+		b[l] = i >> (56 - l*8) & 0xFF;
 }
 
 template <int Bn, typename I>

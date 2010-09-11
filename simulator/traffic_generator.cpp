@@ -31,8 +31,8 @@
 //
 // Contact:  Steven Siloti <ssiloti@gmail.com>
 
-#include "protocols/non_authoritative.hpp"
-#include "protocols/indirect_credit.hpp"
+#include "signature_schemes/non_authoritative.hpp"
+#include "signature_schemes/indirect_credit.hpp"
 #include "traffic_generator.hpp"
 #include "simulator.hpp"
 #include "peer_cache.hpp"
@@ -56,21 +56,22 @@ void traffic_generator::tick(int time)
 	//	return;
 	//}
 	if (time == next_non_authoritative_insert_) {
-		non_authoritative& non_auth = node_.protocol<non_authoritative>();
+		non_authoritative& non_auth = node_.sig<non_authoritative>();
 		std::stringstream content;
 		content << config_.listen_port() << time;
-		payload_buffer_ptr payload = non_auth.get_payload_buffer(content.str().size());
-		std::memcpy(buffer_cast<char*>(payload->get()), content.str().data(), content.str().size());
-		non_auth.insert_hunk(payload);
+		non_authoritative::insert_buffer payload = non_auth.get_insertion_buffer(content.str().size());
+		std::memcpy(buffer_cast<char*>(payload.get()), content.str().data(), content.str().size());
+		content_identifier cid(non_auth.insert_hunk(payload));
 		next_non_authoritative_insert_ = sim.insert_non_authoritative_interval();
-		sim.new_non_authoritative(network_key(payload->get()));
+		sim.new_non_authoritative(cid.publisher);
+		DLOG(INFO) << "New stored non-authoritative hunk (" << content.str() << ") " << std::string(cid.publisher);
 	}
 	if (time == next_non_authoritative_get_) {
 		network_key hunk_id = sim.get_non_authoritative();
 		if (hunk_id != key_max) {
 			sim.begin_query();
 			DLOG(INFO) << "Node id=" << std::string(node_.id()) << " Requesting non-authoritative hunk id=" << std::string(hunk_id);
-			non_authoritative& non_auth = node_.protocol<non_authoritative>();
+			non_authoritative& non_auth = node_.sig<non_authoritative>();
 			non_auth.retrieve_hunk(hunk_id, boost::protect(boost::bind(&traffic_generator::hunk_received, this, _1)));
 		}
 		next_non_authoritative_get_ = sim.get_non_authoritative_interval();

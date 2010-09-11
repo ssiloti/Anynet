@@ -31,186 +31,17 @@
 //
 // Contact:  Steven Siloti <ssiloti@gmail.com>
 
-#include "protocols/user_content.hpp"
+#include "signature_schemes/user_content.hpp"
 #include "node.hpp"
 #include <boost/bind/protect.hpp>
 #include <boost/bind.hpp>
+#include <boost/make_shared.hpp>
 #include <memory>
-
-class payload_content_request : public sendable_payload
-{
-public:
-	virtual std::size_t content_size() const
-	{
-		return size;
-	}
-
-	virtual std::vector<const_buffer> serialize(packet::ptr_t pkt, std::size_t threshold, mutable_buffer scratch) const
-	{
-		packed_request* req = buffer_cast<packed_request*>(scratch);
-		pkt->source().encode(req->key);
-		u32(req->content_size, size);
-		return std::vector<const_buffer>(1, buffer(scratch, sizeof(packed_request)));
-	}
-
-	static std::size_t parse(packet::ptr_t pkt, const_buffer buf)
-	{
-		const packed_request* req = buffer_cast<const packed_request*>(buf);
-
-		pkt->source(network_key(req->key));
-		pkt->payload(new payload_content_request(u32(req->content_size)));
-		return sizeof(packed_request);
-	}
-
-	payload_content_request(std::size_t s) : size(s) {}
-
-	std::size_t size;
-
-private:
-	struct packed_request
-	{
-		boost::uint8_t key[network_key::packed_size];
-		boost::uint8_t content_size[4];
-	};
-};
-
-
-class payload_content_failure : public sendable_payload
-{
-public:
-	virtual std::size_t content_size() const
-	{
-		return sizeof(packed_error);
-	}
-
-	virtual std::vector<const_buffer> serialize(packet::ptr_t pkt, std::size_t threshold, mutable_buffer scratch) const
-	{
-		packed_error* error = buffer_cast<packed_error*>(scratch);
-		pkt->source().encode(error->key);
-		u32(error->content_size, size);
-		return std::vector<const_buffer>(1, buffer(scratch, sizeof(packed_error)));
-	}
-
-	static std::size_t parse(packet::ptr_t pkt, const_buffer buf)
-	{
-		const packed_error* error = buffer_cast<const packed_error*>(buf);
-
-		pkt->source(network_key(error->key));
-		pkt->payload(new payload_content_failure(u32(error->content_size)));
-		return sizeof(packed_error);
-	}
-
-	payload_content_failure(std::size_t s) : size(s) {}
-
-	std::size_t size;
-
-private:
-	struct packed_error
-	{
-		boost::uint8_t key[network_key::packed_size];
-		boost::uint8_t content_size[4];
-	};
-};
-
-template <typename Addr>
-class payload_content_sources : public sendable_payload, public content_sources::ptr_t
-{
-public:
-	typedef Addr address_type;
-
-	virtual std::size_t content_size() const
-	{
-		return get()->size;
-	}
-
-	virtual std::vector<const_buffer> serialize(packet::ptr_t pkt, std::size_t threshold, mutable_buffer scratch) const
-	{
-		packed_detached_sources* s = buffer_cast<packed_detached_sources*>(scratch);
-		int source_send_count = std::min(get()->sources.size(), (buffer_size(scratch) - sizeof(packed_detached_sources)) / sizeof(packed_source_address));
-
-		pkt->source().encode(s->key);
-		u32(s->size, get()->size);
-		u16(s->count, source_send_count);
-
-		// start with the last source whose id is less than the requester's, this is the best (i.e. the one he is most likely to have credit with)
-		distance_iterator<content_sources::sources_t> source(get()->sources, pkt->destination());
-
-		for (int source_idx = 0; source_idx < source_send_count; ++source_idx) {
-			encode_detached_source(&s->sources[source_idx], *source);
-			++source;
-		}
-
-		return std::vector<const_buffer>(1, buffer(scratch, sizeof(packed_detached_sources) + sizeof(packed_source_address) * (source_send_count-1)));
-	}
-
-
-	static std::size_t parse(packet::ptr_t pkt, const_buffer buf, user_content& protocol)
-	{
-		const packed_detached_sources* s = buffer_cast<const packed_detached_sources*>(buf);
-		pkt->source(network_key(s->key));
-		content_sources::ptr_t sources(protocol.get_content_sources(pkt->source(), u32(s->size)));
-		pkt->payload(new payload_content_sources<address_type>(sources));
-		int sources_count = u16(s->count);
-
-		for (int source_idx = 0; source_idx < sources_count; ++source_idx) {
-			sources->sources.insert(decode_detached_source(&s->sources[source_idx]));
-		}
-		return sizeof(packed_detached_sources) + sizeof(packed_source_address) * (sources_count - 1);
-	}
-
-	payload_content_sources(content_sources::ptr_t s) : content_sources::ptr_t(s) {}
-
-private:
-	struct packed_source_address
-	{
-		boost::uint8_t address[address_type::bytes_type::static_size];
-		boost::uint8_t port[2];
-		boost::uint8_t rsvd[2];
-		boost::uint8_t id[network_key::packed_size];
-	};
-
-	struct packed_detached_sources
-	{
-		boost::uint8_t key[network_key::packed_size];
-		boost::uint8_t size[4];
-		boost::uint8_t rsvd[2];
-		boost::uint8_t count[2];
-		packed_source_address sources[1];
-	};
-
-	void encode_detached_source(packed_source_address* packed_address, const content_sources::sources_t::value_type& src) const
-	{
-		typename address_type::bytes_type ip_addr = to<address_type>(src.second.ep.address()).to_bytes();
-		std::memcpy(packed_address->address, ip_addr.data(), ip_addr.size());
-
-		src.first.encode(packed_address->id);
-
-		u16(packed_address->port, src.second.ep.port());
-		u16(packed_address->rsvd, 0);
-	}
-
-	static content_sources::sources_t::value_type decode_detached_source(const packed_source_address* packed_address)
-	{
-		typename address_type::bytes_type ip_addr;
-		content_sources::sources_t::value_type ret(packed_address->id, content_sources::sources_t::mapped_type());
-
-		//ret.first.decode(packed_address->id);
-
-		std::memcpy(ip_addr.data(), packed_address->address, ip_addr.size());
-		ret.second.ep.address(Addr(ip_addr));
-		ret.second.ep.port(u16(packed_address->port));
-
-		return ret;
-	}
-};
-
-typedef payload_content_sources<ip::address_v4> payload_content_sources_v4;
-typedef payload_content_sources<ip::address_v6> payload_content_sources_v6;
 
 class payload_content_buffer : public sendable_payload
 {
 public:
-	virtual std::size_t content_size() const
+	virtual content_size_t content_size() const
 	{
 		return buffer_size(payload->get());
 	}
@@ -223,9 +54,9 @@ public:
 			self_source->sources.insert(std::make_pair(node_.id(), content_sources::source(node_.public_endpoint())));
 			pkt->content_status(packet::content_detached);
 			if (node_.is_v4())
-				pkt->payload(new payload_content_sources_v4(self_source));
+				pkt->payload(boost::make_shared<payload_content_sources_v4>(self_source));
 			else
-				pkt->payload(new payload_content_sources_v6(self_source));
+				pkt->payload(boost::make_shared<payload_content_sources_v6>(self_source));
 			return pkt->payload()->serialize(pkt, threshold, scratch);
 		}
 		else {
@@ -241,35 +72,26 @@ private:
 	local_node& node_;
 };
 
-sendable_payload* content_sources::get_payload()
-{
-	if (sources.empty())
-		return NULL;
-	else if (sources.begin()->second.ep.address().is_v4())
-		return new payload_content_sources_v4(shared_from_this());
-	else
-		return new payload_content_sources_v6(shared_from_this());
-}
-
-void content_request::initiate_request(protocol_t protocol, const network_key& key, local_node& node, std::size_t content_size)
+void user_content_request::initiate_request(signature_scheme_id sig, const content_identifier& key, local_node& node, content_size_t content_size)
 {
 	last_indirect_request_peer_ = node.id();
 	content_size_ = content_size;
 
 	packet::ptr_t pkt(new packet());
-	pkt->protocol(protocol);
+	pkt->sig(sig);
 	pkt->source(node.id());
-	pkt->destination(key);
+	pkt->destination(key.publisher);
+	pkt->name(key.name);
 	pkt->content_status(packet::content_requested);
-	pkt->payload(new payload_content_request(content_size_));
+	pkt->payload(boost::make_shared<payload_request>(content_size_));
 
-	connection::ptr_t con = node.local_request(pkt, key);
+	connection::ptr_t con = node.local_request(pkt, key.publisher);
 
 	if (con)
 		last_indirect_request_peer_ = con->remote_id() - 1;
 }
 
-bool content_request::snoop_packet(local_node& node, packet::ptr_t pkt)
+bool user_content_request::snoop_packet(local_node& node, packet::ptr_t pkt)
 {
 	switch (pkt->content_status())
 	{
@@ -281,10 +103,17 @@ bool content_request::snoop_packet(local_node& node, packet::ptr_t pkt)
 		sources_ = *pkt->payload_as<content_sources::ptr_t>();
 		if (!direct_request_pending_) {
 			if (!partial_content_) {
-				partial_content_ = framented_content(static_cast<user_content*>(&node.get_protocol(pkt))->get_payload_buffer(sources_->size));
+				// For now we can't download content which is larger than size_t
+				// this would require modifications in the hunk store to do partial mapping
+				if (sources_->size > std::numeric_limits<std::size_t>::max()) {
+					for (std::vector<keyed_handler_t>::iterator handler = handlers_.begin(); handler != handlers_.end(); ++handler)
+						(*handler)(const_payload_buffer_ptr());
+					return true;
+				}
+				partial_content_ = framented_content(static_cast<user_content*>(&node.get_protocol(pkt))->get_payload_buffer(std::size_t(sources_->size)));
 			}
 			std::pair<std::size_t, std::size_t> range = partial_content_->next_invalid_range();
-			frame_fragment::ptr_t frag(new frame_fragment(pkt->protocol(), pkt->source(), range.first, range.second));
+			frame_fragment::ptr_t frag(new frame_fragment(pkt->sig(), pkt->content_id(), range.first, range.second));
 			node.direct_request(sources_->sources.begin()->second.ep, frag);
 			++sources_->sources.begin()->second.active_request_count;
 			direct_request_pending_ = true;
@@ -303,7 +132,7 @@ bool content_request::snoop_packet(local_node& node, packet::ptr_t pkt)
 			pkt->destination(pkt->source());
 			pkt->source(node.id());
 			pkt->content_status(packet::content_requested);
-			pkt->payload(new payload_content_request(content_size_));
+			pkt->payload(boost::make_shared<payload_request>(content_size_));
 
 			connection::ptr_t con = node.local_request(pkt, last_indirect_request_peer_);
 
@@ -327,7 +156,7 @@ bool content_request::snoop_packet(local_node& node, packet::ptr_t pkt)
 	}
 }
 
-const_payload_buffer_ptr content_request::snoop_fragment(local_node& node, const network_key& src, frame_fragment::ptr_t frag)
+const_payload_buffer_ptr user_content_request::snoop_fragment(local_node& node, const network_key& src, frame_fragment::ptr_t frag)
 {
 	if (!partial_content_) {
 		// We got a fragment frame for something we haven't started a fragmented download on yet
@@ -350,8 +179,9 @@ const_payload_buffer_ptr content_request::snoop_fragment(local_node& node, const
 			const_payload_buffer_ptr payload = partial_content_->complete();
 
 			if (payload) {
+				// TODO: Call out to virtual validate function instead of enforcing pid == hash of content
 				network_key pid(payload->get());
-				if (pid == frag->id())
+				if (pid == frag->id().publisher)
 					return payload;
 				else
 					partial_content_->reset();
@@ -380,7 +210,7 @@ const_payload_buffer_ptr content_request::snoop_fragment(local_node& node, const
 	return const_payload_buffer_ptr();
 }
 
-framented_content::fragment_buffer content_request::get_fragment_buffer(std::size_t offset, std::size_t size)
+framented_content::fragment_buffer user_content_request::get_fragment_buffer(std::size_t offset, std::size_t size)
 {
 	if (partial_content_)
 		return partial_content_->get_fragment_buffer(offset, size);
@@ -388,7 +218,7 @@ framented_content::fragment_buffer content_request::get_fragment_buffer(std::siz
 		return framented_content::fragment_buffer(offset);
 }
 
-bool content_request::timeout(local_node& node, packet::ptr_t pkt)
+bool user_content_request::timeout(local_node& node, packet::ptr_t pkt)
 {
 	if (direct_request_pending_) {
 		frame_fragment::ptr_t frag(new frame_fragment());
@@ -400,18 +230,18 @@ bool content_request::timeout(local_node& node, packet::ptr_t pkt)
 	return snoop_packet(node, pkt);
 }
 
-user_content::user_content(local_node& node, protocol_t p)
-	: network_protocol(node), protocol_(p), vacume_sources_(node.io_service())
+user_content::user_content(local_node& node, signature_scheme_id p)
+	: fragmented_protocol(node, p)
 {}
 
 void user_content::to_content_location_failure(packet::ptr_t pkt)
 {
-	pkt->to_reply(packet::content_failure, new payload_content_failure(pkt->payload_as<payload_content_request>()->size));
+	pkt->to_reply(packet::content_failure, boost::make_shared<payload_failure>(pkt->payload_as<payload_request>()->size));
 }
 
 void user_content::request_from_location_failure(packet::ptr_t pkt)
 {
-	pkt->to_reply(packet::content_requested, new payload_content_request(pkt->payload_as<payload_content_failure>()->size));
+	pkt->to_reply(packet::content_requested, boost::make_shared<payload_request>(pkt->payload_as<payload_failure>()->size));
 }
 
 void user_content::snoop_packet_payload(packet::ptr_t pkt)
@@ -424,11 +254,11 @@ void user_content::snoop_packet_payload(packet::ptr_t pkt)
 
 			if (content) {
 				DLOG(INFO) << "Replying with content to request from " << std::string(pkt->source()) << " for " << std::string(pkt->destination());
-				pkt->to_reply(packet::content_attached, new payload_content_buffer(node_, content));
+				pkt->to_reply(packet::content_attached, boost::make_shared<payload_content_buffer>(boost::ref(node_), content));
 				break;
 			}
 
-			content_sources_t::const_iterator detached_sources = content_sources_.find(pkt->destination());
+			content_sources_t::const_iterator detached_sources = content_sources_.find(pkt->content_id());
 
 			if (detached_sources != content_sources_.end() && detached_sources->second->sources.size() > 0) {
 				DLOG(INFO) << "Respopnding with detached source to request from " << std::string(pkt->source()) << " for " << std::string(pkt->destination());
@@ -440,14 +270,16 @@ void user_content::snoop_packet_payload(packet::ptr_t pkt)
 	case packet::content_attached:
 		{
 			hunk_descriptor_t hunk_desc;
-			pkt->source(content_id(pkt->payload_as<payload_content_buffer>()->payload));
+			content_identifier cid(content_id(pkt->payload_as<payload_content_buffer>()->payload));
+			pkt->source(cid.publisher);
+			pkt->name(cid.name);
 			if (pkt->is_direct()) {
 				hunk_desc = node_.cache_local_request(id(), pkt->source(), buffer_size(pkt->payload_as<payload_content_buffer>()->payload->get()));
 			}
 			else if (pkt->source() == pkt->destination())
 				hunk_desc = node_.cache_store(id(), pkt->source(), buffer_size(pkt->payload_as<payload_content_buffer>()->payload->get()));
 			else {
-				content_requests_t::iterator recent_request = recent_requests_.find(pkt->source());
+				content_requests_t::iterator recent_request = recent_requests_.find(pkt->content_id());
 				if (recent_request == recent_requests_.end() || recent_request->second[1].is_not_a_date_time())
 					break;
 				hunk_desc = node_.cache_remote_request(id(), pkt->source(), buffer_size(pkt->payload_as<payload_content_buffer>()->payload->get()), recent_request->second[0] - recent_request->second[1]);
@@ -472,14 +304,14 @@ void user_content::snoop_packet_payload(packet::ptr_t pkt)
 	if (pkt->content_status() == packet::content_attached) {
 		// we should probably be checking in get_content_sources and not even inserting the sources
 		// if we already have the content, but for now just remove it here
-		content_sources_t::iterator sources = content_sources_.find(pkt->source());
+		content_sources_t::iterator sources = content_sources_.find(pkt->content_id());
 		if (sources != content_sources_.end())
 			content_sources_.erase(sources);
 	}
 
 	if (pkt->content_status() != packet::content_requested) {
 		// see if we have an outstanding request which might be interested in this packet
-		response_handlers_t::iterator keyed_handler = response_handlers_.find(pkt->source());
+		response_handlers_t::iterator keyed_handler = response_handlers_.find(pkt->content_id());
 
 		if (keyed_handler != response_handlers_.end()) {
 			if (keyed_handler->second->request.snoop_packet(node_, pkt)) {
@@ -508,21 +340,23 @@ void user_content::snoop_fragment(const network_key& src, frame_fragment::ptr_t 
 
 			if (payload) {
 				packet::ptr_t pkt(new packet());
-				pkt->protocol(id());
+				pkt->sig(id());
 				pkt->content_status(packet::content_attached);
 				pkt->mark_direct();
 				pkt->destination(node_.id());
-				pkt->payload(new payload_content_buffer(node_, payload));
+				pkt->name(frag->id().name);
+				pkt->payload(boost::make_shared<payload_content_buffer>(boost::ref(node_), payload));
 				snoop_packet(pkt);
 				return;
 			}
 			else if (frag->status() == frame_fragment::status_failed) {
 				packet::ptr_t pkt(new packet());
-				pkt->protocol(id());
+				pkt->sig(id());
 				pkt->content_status(packet::content_failure);
-				pkt->source(frag->id());
+				pkt->source(frag->id().publisher);
+				pkt->name(frag->id().name);
 				pkt->destination(node_.id());
-				pkt->payload(new payload_content_failure(0));
+				pkt->payload(boost::make_shared<payload_failure>(0));
 				if (request->second->request.snoop_packet(node_, pkt)) {
 				//	request->second->timeout.cancel();
 					response_handlers_.erase(request);
@@ -548,82 +382,15 @@ void user_content::snoop_fragment(const network_key& src, frame_fragment::ptr_t 
 	}
 }
 
-void user_content::receive_payload(connection::ptr_t con, packet::ptr_t pkt, std::size_t payload_size)
+void user_content::receive_attached_content(connection::ptr_t con, packet::ptr_t pkt, std::size_t payload_size)
 {
-	switch (pkt->content_status())
-	{
-	case packet::content_attached:
-		{
-			if (payload_size == 0) {
-				packet::ptr_t p;
-				node_.packet_received(con, p);
-			}
-			else {
-				payload_buffer_ptr payload_buffer(get_payload_buffer(payload_size));
-				pkt->payload(new payload_content_buffer(node_, payload_buffer));
-				con->receive_payload(std::vector<mutable_buffer>(1, payload_buffer->get()), boost::protect(boost::bind(&user_content::content_received, this, con, pkt)));
-			}
-			break;
-		}
-	case packet::content_detached:
-		{
-			if (payload_size == 0) {
-				packet::ptr_t p;
-				node_.packet_received(con, p);
-			}
-			else {
-				con->receive_payload(payload_size, boost::protect(boost::bind(&user_content::sources_received, this, con, pkt, _1)));
-			}
-			break;
-		}
-	case packet::content_requested:
-		{
-			if (payload_size == 0) {
-				packet::ptr_t p;
-				node_.packet_received(con, p);
-			}
-			else {
-				con->receive_payload(payload_size, boost::protect(boost::bind(&user_content::request_received, this, con, pkt, _1)));
-			}
-			break;
-		}
-	case packet::content_failure:
-		{
-			if (payload_size == 0) {
-				packet::ptr_t p;
-				node_.packet_received(con, p);
-			}
-			else {
-				con->receive_payload(payload_size, boost::protect(boost::bind(&user_content::failure_received, this, con, pkt, _1)));
-			}
-			break;
-		}
-	}
+	payload_buffer_ptr payload_buffer(get_payload_buffer(payload_size));
+	pkt->payload(boost::make_shared<payload_content_buffer>(boost::ref(node_), payload_buffer));
+	con->receive_payload(std::vector<mutable_buffer>(1, payload_buffer->get()), boost::protect(boost::bind(&user_content::content_received, this, con, pkt)));
 }
 
 void user_content::content_received(connection::ptr_t con, packet::ptr_t pkt)
 {
-	node_.packet_received(con, pkt);
-}
-
-void user_content::sources_received(connection::ptr_t con, packet::ptr_t pkt, const_buffer buf)
-{
-	if (con->remote_endpoint().address().is_v4())
-		payload_content_sources_v4::parse(pkt, buf, *this);
-	else
-		payload_content_sources_v6::parse(pkt, buf, *this);
-	node_.packet_received(con, pkt);
-}
-
-void user_content::request_received(connection::ptr_t con, packet::ptr_t pkt, const_buffer buf)
-{
-	payload_content_request::parse(pkt, buf);
-	node_.packet_received(con, pkt);
-}
-
-void user_content::failure_received(connection::ptr_t con, packet::ptr_t pkt, const_buffer buf)
-{
-	payload_content_failure::parse(pkt, buf);
 	node_.packet_received(con, pkt);
 }
 
@@ -686,26 +453,6 @@ void user_content::content_fragment_received(connection::ptr_t con, frame_fragme
 	snoop_fragment(con->remote_id(), frag);
 }
 
-void user_content::start_vacume()
-{
-	vacume_sources_.expires_from_now(boost::posix_time::minutes(1));
-	vacume_sources_.async_wait(boost::bind(&user_content::vacume_sources,
-	                                       boost::static_pointer_cast<user_content>(shared_from_this()),
-	                                       _1)); // TODO: Using boost::asio::placeholders::error here results in
-	                                             // a null pointer dereference!? Need to understand what the hell is
-	                                             // up with that
-}
-
-content_sources::ptr_t user_content::get_content_sources(network_key id, std::size_t size)
-{
-	std::pair<content_sources_t::iterator, bool> found_sources = content_sources_.insert( std::make_pair( id, content_sources::ptr_t() ) );
-
-	if (found_sources.second)
-		found_sources.first->second.reset(new content_sources(size));
-
-	return found_sources.first->second;
-}
-
 framented_content::fragment_buffer user_content::get_fragment_buffer(frame_fragment::ptr_t frag)
 {
 	response_handlers_t::iterator request = response_handlers_.find(frag->id());
@@ -716,7 +463,7 @@ framented_content::fragment_buffer user_content::get_fragment_buffer(frame_fragm
 		return framented_content::fragment_buffer(frag->offset());
 }
 
-void user_content::new_content_request(const network_key& key, std::size_t content_size, const content_request::keyed_handler_t& handler)
+void user_content::new_content_request(const content_identifier& key, content_size_t content_size, const user_content_request::keyed_handler_t& handler)
 {
 	std::pair<response_handlers_t::iterator, bool> rh = response_handlers_.insert(std::make_pair(key, boost::shared_ptr<response_handler>()));
 
@@ -735,31 +482,33 @@ void user_content::new_content_request(const network_key& key, std::size_t conte
 		rh.first->second->request.initiate_request(id(), key, node_, content_size);
 }
 
-void user_content::new_content_store(const_payload_buffer_ptr hunk)
+void user_content::new_content_store(content_identifier cid, const_payload_buffer_ptr hunk)
 {
-	network_key key(hunk->get());
+	DLOG(INFO) << "New store request for cid " << std::string(cid.publisher);
 	packet::ptr_t pkt(new packet());
-	pkt->destination(key);
-	pkt->source(key);
+	pkt->destination(cid.publisher);
+	pkt->source(cid.publisher);
+	pkt->name(cid.name);
 	pkt->content_status(packet::content_attached);
-	pkt->protocol(id());
-	pkt->payload(new payload_content_buffer(node_, hunk));
+	pkt->sig(id());
+	pkt->payload(boost::make_shared<payload_content_buffer>(boost::ref(node_), hunk));
 	node_.local_request(pkt);
 }
 
-void user_content::remove_response_handler(network_key key, const boost::system::error_code& error)
+void user_content::remove_response_handler(content_identifier key, const boost::system::error_code& error)
 {
 	if (!error) {
-		DLOG(INFO) << std::string(node_.id()) << ": Removing response handler " << std::string(key);
+		DLOG(INFO) << std::string(node_.id()) << ": Removing response handler " << std::string(key.publisher);
 		response_handlers_t::iterator iter = response_handlers_.find(key);
 		if (iter != response_handlers_.end()) {
 			google::FlushLogFiles(google::INFO);
 			packet::ptr_t pkt(new packet());
-			pkt->protocol(id());
+			pkt->sig(id());
 			pkt->content_status(packet::content_failure);
-			pkt->source(key);
+			pkt->source(key.publisher);
+			pkt->name(key.name);
 			pkt->destination(node_.id());
-			pkt->payload(new payload_content_failure(0));
+			pkt->payload(boost::make_shared<payload_failure>(0));
 			if (iter->second->request.timeout(node_, pkt))
 				// request has nothing more to do, put him out of his misery
 				response_handlers_.erase(iter);
@@ -775,43 +524,3 @@ void user_content::remove_response_handler(network_key key, const boost::system:
 	}
 }
 
-void user_content::vacume_sources(const boost::system::error_code& error)
-{
-	if (!error && !shutting_down_) {
-		boost::posix_time::ptime now = boost::posix_time::second_clock::universal_time();
-		boost::posix_time::time_duration age_cap = node_.base_hunk_lifetime();
-
-		for (content_sources_t::iterator content = content_sources_.begin(); content != content_sources_.end();) {
-			bool successor = node_.closer_peers(content->first) == 0;
-			for (content_sources::sources_t::iterator source = content->second->sources.begin(); source != content->second->sources.end();) {
-				boost::posix_time::time_duration age = now - source->second.stored;
-				if ( (age < age_cap) || (successor && age < min_successor_source_age) || source->second.active_request_count ) {
-					++source;
-				}
-				else {
-					content_sources::sources_t::iterator next = source;
-					++next;
-					content->second->sources.erase(source);
-					source = next;
-				}
-			}
-
-			if (!content->second->sources.empty()) {
-				++content;
-			}
-			else {
-				content_sources_t::iterator next = content;
-				++next;
-				content_sources_.erase(content);
-				content = next;
-			}
-		}
-
-		vacume_sources_.expires_from_now(boost::posix_time::minutes(1));
-		vacume_sources_.async_wait(boost::bind(&user_content::vacume_sources,
-		                                       boost::static_pointer_cast<user_content>(shared_from_this()),
-		                                       placeholders::error));
-	}
-	else if (!error)
-		DLOG(INFO) << std::string(node_.id()) << ": Vacuming sources";
-}

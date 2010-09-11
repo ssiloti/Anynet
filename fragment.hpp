@@ -35,7 +35,7 @@
 #define FRAGMENT_HPP
 
 #include "link.hpp"
-#include "key.hpp"
+#include "content.hpp"
 #include "hunk.hpp"
 #include <boost/asio/read.hpp>
 #include <boost/asio/write.hpp>
@@ -58,6 +58,8 @@ class frame_fragment;
 class framented_content
 {
 public:
+	typedef boost::shared_ptr<framented_content> ptr_t;
+
 	struct fragment_buffer
 	{
 		friend class framented_content;
@@ -110,13 +112,13 @@ public:
 		status_failed = 3,
 	};
 
-	frame_fragment(protocol_t proto, network_key i, std::size_t o, std::size_t s, const_payload_buffer_ptr payload = const_payload_buffer_ptr())
+	frame_fragment(signature_scheme_id proto, content_identifier i, std::size_t o, std::size_t s, const_payload_buffer_ptr payload = const_payload_buffer_ptr())
 		: protocol_(proto), id_(i), offset_(o), size_(s), payload_(payload), status_(payload ? status_attached : status_requested) {}
-	frame_fragment(protocol_t proto, network_key i) : protocol_(proto), id_(i), status_(status_failed) {}
+	frame_fragment(signature_scheme_id proto, content_identifier i) : protocol_(proto), id_(i), status_(status_failed) {}
 	frame_fragment() : status_(status_failed) {}
 
-	protocol_t protocol() const { return protocol_; }
-	const network_key& id() const { return id_; }
+	signature_scheme_id sig() const { return protocol_; }
+	const content_identifier& id() const { return id_; }
 	std::size_t offset() const { return offset_; }
 	std::size_t size() const { return size_; }
 	void trim_to(std::size_t s) { size_ = std::min(size_, s); }
@@ -142,16 +144,17 @@ public:
 		else
 			boost::asio::async_read(link.socket,
 			                        mutable_buffers_1(link.receive_buffer()),
-									boost::asio::transfer_at_least(header_size() - link.valid_received_bytes()),
+			                        boost::asio::transfer_at_least(header_size() - link.valid_received_bytes()),
 			                        boost::bind(&frame_fragment::header_received<Handler>,
 			                                    shared_from_this(),
-												boost::ref(link),
-												handler,
+			                                    boost::ref(link),
+			                                    handler,
 			                                    placeholders::error,
 			                                    placeholders::bytes_transferred));
 	}
 
 	// For future UDP support
+#if 0
 	std::size_t parse(const_buffer& buf)
 	{
 		if (buffer_size(buf) < header_size())
@@ -163,13 +166,14 @@ public:
 
 		return payload_size;
 	}
+#endif
 
 	void attach_padding(boost::shared_ptr<heap_buffer> buf) { padding_.push_back(buf); }
 	void clear_padding() { padding_.clear(); }
 
 private:
-	std::size_t serialize_header(boost::uint8_t* buf);
-	std::size_t parse_header(const_buffer buf);
+	std::size_t serialize_header(mutable_buffer buf);
+	std::pair<std::size_t, unsigned> parse_header(const_buffer buf);
 	std::size_t header_size();
 
 	template <typename Handler>
@@ -185,9 +189,33 @@ private:
 			return;
 		}
 
-		std::size_t payload_size = parse_header(link.received_buffer());
+		std::pair<std::size_t, unsigned> name_payload_size = parse_header(link.received_buffer());
 		link.received(header_size());
 		link.consume_receive_buffer(header_size());
+
+		id_.name.receive(name_payload_size.second,
+		                 link,
+		                 boost::protect(boost::bind(&frame_fragment::name_received<Handler>,
+		                                            shared_from_this(),
+		                                            name_payload_size.first,
+		                                            boost::ref(link),
+		                                            handler,
+		                                            placeholders::error)));
+	}
+
+	template <typename Handler>
+	void name_received(std::size_t payload_size,
+	                   net_link& link,
+	                   Handler handler,
+	                   const boost::system::error_code& error)
+	{
+		if (error || !link.socket.lowest_layer().is_open()
+		    || (status() == status_attached && size() == 0)) {
+			DLOG(INFO) << "Error receiving fragment frame" << error;
+			ptr_t p;
+			handler(p, payload_size);
+			return;
+		}
 
 		ptr_t p(shared_from_this());
 		handler(p, payload_size);
@@ -209,10 +237,10 @@ private:
 	}
 
 	std::size_t offset_, size_;
-	network_key id_;
+	content_identifier id_;
 	const_payload_buffer_ptr payload_;
 	std::vector<boost::shared_ptr<heap_buffer> > padding_;
-	protocol_t protocol_;
+	signature_scheme_id protocol_;
 	fragment_status status_;
 };
 

@@ -48,6 +48,8 @@
 #include <boost/utility.hpp>
 #include <deque>
 
+#define FORCE_OOB_TRANSFERS TRUE
+
 class local_node;
 class connection;
 
@@ -306,12 +308,13 @@ private:
 
 	void update_oob_threshold()
 	{
-#if 0
+#if FORCE_OOB_TRANSFERS
+		oob_threshold_ = 0;
+#else
 		oob_threshold_ = std::min(remote_oob_threshold_, local_oob_threshold_);
 		if (oob_threshold_ < min_oob_threshold)
 			oob_threshold_ = min_oob_threshold;
 #endif
-		oob_threshold_ = 0;
 		send_next_frame(frame_bit_oob_threshold_update);
 	}
 

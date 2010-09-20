@@ -37,9 +37,9 @@
 #include <glog/logging.h>
 
 #include "packet.hpp"
-#include "fragment.hpp"
 #include "link.hpp"
 #include "core.hpp"
+#include <boost/function.hpp>
 #include <boost/asio/write.hpp>
 #include <boost/date_time/posix_time/posix_time_types.hpp>
 #include <boost/enable_shared_from_this.hpp>
@@ -49,10 +49,27 @@
 #include <deque>
 
 class local_node;
+class connection;
+
+class protocol_frame : public content_frame
+{
+public:
+	typedef boost::shared_ptr<protocol_frame> ptr_t;
+
+	struct packed_header
+	{
+		boost::uint8_t frame_type;
+		boost::uint8_t rsvd;
+		boost::uint8_t sig_scheme[2];
+	};
+
+	virtual bool done() = 0;
+	virtual void send_failure(local_node& node, const network_key& dest) = 0;
+};
 
 class connection : public boost::enable_shared_from_this<connection>, boost::noncopyable
 {
-	const static int min_oob_threshold = 8000;
+	const static int min_oob_threshold = 0;
 	const static boost::posix_time::millisec target_latency;
 public:
 	typedef boost::shared_ptr<connection> ptr_t;
@@ -77,7 +94,6 @@ public:
 	enum frame_types
 	{
 		frame_network_packet = 0,
-		frame_fragment,
 		frame_oob_threshold_update,
 		frame_successor_request,
 		frame_successor,
@@ -97,7 +113,7 @@ public:
 	bool accepts_ib_traffic() const { return routing_type_ & 0x01; }
 	bool is_connected() const { return lifecycle_ == connected; }
 	boost::posix_time::time_duration age() { return boost::posix_time::second_clock::universal_time() - established_; }
-	bool is_transfer_outstanding() const { return transfer_outstanding_ || outstanding_non_packet_frames_ || !packet_queue_.empty() || !fragment_queue_.empty(); }
+	bool is_transfer_outstanding() const { return receive_outstanding_ || outstanding_non_packet_frames_ || !packet_queue_.empty() || !frame_queue_.empty(); }
 	bool supports_protocol(signature_scheme_id p) { return std::find(supported_protocols_.begin(), supported_protocols_.end(), p) != supported_protocols_.end(); }
 
 	void send_reverse_successor()
@@ -110,10 +126,16 @@ public:
 		send_next_frame(frame_bit_successor_request);
 	}
 
+	void send_ack()
+	{
+		++ack_sends_needed_;
+		update_oob_threshold();
+	}
+
 	void disconnect();
 
 	void send(packet::ptr_t pkt);
-	void send(frame_fragment::ptr_t frag);
+	void send(protocol_frame::ptr_t frame);
 
 	template <typename Handler>
 	void receive_payload(std::size_t payload_size, Handler handler)
@@ -128,7 +150,7 @@ public:
 			                                    payload_size,
 			                                    placeholders::error,
 			                                    placeholders::bytes_transferred));
-			link_.consume_receive_buffer(link_.valid_received_bytes());
+		//	link_.consume_receive_buffer(link_.valid_received_bytes());
 		}
 		else {
 			payload_received(handler, payload_size, boost::system::error_code(), 0);
@@ -177,17 +199,18 @@ public:
 		                     boost::protect(boost::bind(&connection::payload_received<Handler>,
 		                                                shared_from_this(),
 		                                                handler,
-		                                                const_buffer(),
 		                                                placeholders::error,
 		                                                placeholders::bytes_transferred)));
 	}
 
+#if 0
 	std::size_t discard_payload(std::size_t bytes)
 	{
 		std::size_t consumable = std::min(bytes, link_.valid_received_bytes());
 		link_.consume_receive_buffer(consumable);
 		return consumable;
 	}
+#endif
 
 	static ptr_t connect(local_node& node, ip::tcp::endpoint peer, routing_type rtype);
 
@@ -211,8 +234,15 @@ private:
 private:
 	struct queued_packet
 	{
-		queued_packet(content_frame::ptr_t m) : msg(m), entered(boost::posix_time::microsec_clock::universal_time()) {}
-		content_frame::ptr_t msg;
+		queued_packet(packet::ptr_t p) : pkt(p), entered(boost::posix_time::microsec_clock::universal_time()) {}
+		packet::ptr_t pkt;
+		boost::posix_time::ptime entered;
+	};
+
+	struct queued_protocol_frame
+	{
+		queued_protocol_frame(boost::shared_ptr<protocol_frame> f) : frame(f), entered(boost::posix_time::microsec_clock::universal_time()) {}
+		boost::shared_ptr<protocol_frame> frame;
 		boost::posix_time::ptime entered;
 	};
 
@@ -240,7 +270,7 @@ private:
 
 	void frame_head_received(const boost::system::error_code& error, std::size_t bytes_transfered);
 	void incoming_packet(packet::ptr_t pkt, std::size_t payload_size);
-	void incoming_fragment(frame_fragment::ptr_t, std::size_t payload_size);
+//	void incoming_fragment(frame_fragment::ptr_t, std::size_t payload_size);
 	void receive_next_frame();
 
 	template <typename Handler>
@@ -276,11 +306,13 @@ private:
 
 	void update_oob_threshold()
 	{
+#if 0
 		oob_threshold_ = std::min(remote_oob_threshold_, local_oob_threshold_);
 		if (oob_threshold_ < min_oob_threshold)
 			oob_threshold_ = min_oob_threshold;
+#endif
+		oob_threshold_ = 0;
 		send_next_frame(frame_bit_oob_threshold_update);
-	//	oob_threshold_ = 0;
 	}
 
 	std::size_t successor_size();
@@ -289,7 +321,7 @@ private:
 	void send_next_frame(int send_non_packet_frame);
 	void send_next_frame();
 	void packet_sent(const boost::system::error_code& error, std::size_t bytes_transfered);
-	void fragment_sent(const boost::system::error_code& error, std::size_t bytes_transfered);
+	void protocol_frame_sent(const boost::system::error_code& error, std::size_t bytes_transfered);
 	void frame_sent(frame_bits frame_bit, const boost::system::error_code& error, std::size_t bytes_transfered);
 
 	//void packet_sent(const boost::system::error_code& error, std::size_t bytes_transferred);
@@ -315,23 +347,19 @@ private:
 
 	boost::uint16_t incoming_port_;
 	boost::posix_time::ptime established_;
-
 	routing_type routing_type_;
-
+	lifecycle lifecycle_;
 	network_key remote_identity_;
 	ip::address reported_peer_address_;
 	std::vector<signature_scheme_id> supported_protocols_;
 
 	std::deque<queued_packet> packet_queue_;
-	std::deque<frame_fragment::ptr_t> fragment_queue_;
+	std::deque<queued_protocol_frame> frame_queue_;
 	std::deque<pending_ack> ack_queue_;
 	int outstanding_non_packet_frames_;
-	boost::posix_time::ptime fragment_sent_;
+	unsigned ack_sends_needed_;
 
-	packet::ptr_t pending_recv_;
-	bool transfer_outstanding_;
-
-	lifecycle lifecycle_;
+	bool receive_outstanding_;
 };
 
 #endif

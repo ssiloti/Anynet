@@ -76,8 +76,8 @@ struct successor_frame
 
 connection::connection(local_node& node, routing_type rtype)
 : node_(node), link_(node.io_service(), node.context), routing_type_(rtype), incoming_port_(0),
-	lifecycle_(connecting), oob_threshold_(min_oob_threshold), local_oob_threshold_(min_oob_threshold), transfer_outstanding_(false),
-	outstanding_non_packet_frames_(0)
+	lifecycle_(connecting), oob_threshold_(min_oob_threshold), local_oob_threshold_(min_oob_threshold), receive_outstanding_(false),
+	outstanding_non_packet_frames_(0), ack_sends_needed_(0)
 {
 
 }
@@ -318,31 +318,31 @@ void connection::complete_connection(const boost::system::error_code& error, std
 
 void connection::send(packet::ptr_t pkt)
 {
-	packet_queue_.push_back(boost::static_pointer_cast<content_frame>(pkt));
+	packet_queue_.push_back(pkt);
 
-	if (!outstanding_non_packet_frames_ && packet_queue_.size() == 1 && fragment_queue_.empty() && lifecycle_ == connected) {
+	if (!outstanding_non_packet_frames_ && packet_queue_.size() == 1 && frame_queue_.empty() && lifecycle_ == connected) {
 		send_next_frame();
 	}
 	else
 		DLOG(INFO) << "Queued packet from " << std::string(node_.id()) << " to " << std::string(remote_id());
 }
 
-void connection::send(frame_fragment::ptr_t frag)
+void connection::send(protocol_frame::ptr_t frame)
 {
-	fragment_queue_.push_back(frag);
+	frame_queue_.push_back(frame);
 
-	if (!outstanding_non_packet_frames_ && packet_queue_.empty() && fragment_queue_.size() == 1 && lifecycle_ == connected)
+	if (!outstanding_non_packet_frames_ && packet_queue_.empty() && frame_queue_.size() == 1 && lifecycle_ == connected)
 		send_next_frame();
 }
 
 void connection::receive_next_frame()
 {
 	if (link_.valid_received_bytes()) {
-		transfer_outstanding_ = true;
+		receive_outstanding_ = true;
 		frame_head_received(boost::system::error_code(), 0);
 	}
 	else {
-		transfer_outstanding_ = false;
+		receive_outstanding_ = false;
 		boost::asio::async_read(link_.socket,
 		                        mutable_buffers_1(link_.receive_buffer()),
 		                        boost::asio::transfer_at_least(4),
@@ -367,77 +367,100 @@ void connection::frame_head_received(const boost::system::error_code& error, std
 
 	while (link_.valid_received_bytes())
 	{
-		switch (buffer_cast<const boost::uint8_t*>(link_.received_buffer())[0])
-		{
-		case frame_network_packet:
+		int frame_type(buffer_cast<const boost::uint8_t*>(link_.received_buffer())[0]);
+		if (!(frame_type & 0x80)) {
+			// This is a standard frame (frame_id < 128)
+			switch (frame_type)
 			{
-	//			DLOG(INFO) << "Receiving network packet frame";
-				packet::ptr_t pkt(new packet());
-				pkt->receive(link_, boost::protect(boost::bind(&connection::incoming_packet, shared_from_this(), _1, _2)));
-				return;
-			}
-		case frame_oob_threshold_update:
-			if (link_.valid_received_bytes() >= oob_threshold_size()) {
-				parse_oob_threshold();
-				break;
-			}
-
-			boost::asio::async_read(link_.socket,
-			                        mutable_buffers_1(link_.receive_buffer()),
-			                        boost::asio::transfer_at_least(oob_threshold_size() - link_.valid_received_bytes()),
-			                        boost::bind(&connection::frame_head_received,
-			                                    shared_from_this(),
-			                                    placeholders::error,
-			                                    placeholders::bytes_transferred));
-			return;
-
-		case frame_successor_request:
-			{
-				if (link_.valid_received_bytes() >= 4) {
-					DLOG(INFO) << std::string(node_.id()) << "Sending successor";
-					send_next_frame(frame_bit_successor);
-					link_.consume_receive_buffer(4);
+			case frame_network_packet:
+				{
+		//			DLOG(INFO) << "Receiving network packet frame";
+					packet::ptr_t pkt(boost::make_shared<packet>());
+					pkt->receive(link_, boost::protect(boost::bind(&connection::incoming_packet, shared_from_this(), _1, _2)));
+					return;
+				}
+			case frame_oob_threshold_update:
+				if (link_.valid_received_bytes() >= oob_threshold_size()) {
+					parse_oob_threshold();
 					break;
 				}
 
 				boost::asio::async_read(link_.socket,
 				                        mutable_buffers_1(link_.receive_buffer()),
-				                        boost::asio::transfer_at_least(4 - link_.valid_received_bytes()),
+				                        boost::asio::transfer_at_least(oob_threshold_size() - link_.valid_received_bytes()),
 				                        boost::bind(&connection::frame_head_received,
 				                                    shared_from_this(),
 				                                    placeholders::error,
 				                                    placeholders::bytes_transferred));
+				return;
 
+			case frame_successor_request:
+				{
+					if (link_.valid_received_bytes() >= 4) {
+						DLOG(INFO) << std::string(node_.id()) << "Sending successor";
+						send_next_frame(frame_bit_successor);
+						link_.consume_receive_buffer(4);
+						break;
+					}
+
+					boost::asio::async_read(link_.socket,
+					                        mutable_buffers_1(link_.receive_buffer()),
+					                        boost::asio::transfer_at_least(4 - link_.valid_received_bytes()),
+					                        boost::bind(&connection::frame_head_received,
+					                                    shared_from_this(),
+					                                    placeholders::error,
+					                                    placeholders::bytes_transferred));
+
+					return;
+				}
+
+			case frame_successor:
+				if (link_.valid_received_bytes() >= successor_size()) {
+					parse_successor();
+					break;
+				}
+
+				boost::asio::async_read(link_.socket,
+				                        mutable_buffers_1(link_.receive_buffer()),
+				                        boost::asio::transfer_at_least(oob_threshold_size() - link_.valid_received_bytes()),
+				                        boost::bind(&connection::frame_head_received,
+				                                    shared_from_this(),
+				                                    placeholders::error,
+				                                    placeholders::bytes_transferred));
+				return;
+#if 0
+			case frame_fragment:
+				{
+					::frame_fragment::ptr_t frag(new ::frame_fragment());
+					frag->receive(link_, boost::protect(boost::bind(&connection::incoming_fragment, shared_from_this(), _1, _2)));
+					return;
+				}
+#endif
+			default:
+				{
+					DLOG(INFO) << "Unknown frame type: " << buffer_cast<const boost::uint8_t*>(link_.received_buffer())[0];
+					google::FlushLogFiles(google::INFO);
+					node_.receive_failure(shared_from_this());
+					return;
+				}
+			}
+		}
+		else {
+			// this is a protocol specific frame
+			// get the protocol and hand it off to the node
+			if (link_.valid_received_bytes() >= 4) {
+				signature_scheme_id protocol = buffer_cast<const boost::uint16_t*>(link_.received_buffer())[1];
+				node_.incoming_protocol_frame(shared_from_this(), protocol, frame_type);
 				return;
 			}
-
-		case frame_successor:
-			if (link_.valid_received_bytes() >= successor_size()) {
-				parse_successor();
-				break;
-			}
-
-			boost::asio::async_read(link_.socket,
-			                        mutable_buffers_1(link_.receive_buffer()),
-			                        boost::asio::transfer_at_least(oob_threshold_size() - link_.valid_received_bytes()),
-			                        boost::bind(&connection::frame_head_received,
-			                                    shared_from_this(),
-			                                    placeholders::error,
-			                                    placeholders::bytes_transferred));
-			return;
-
-		case frame_fragment:
-			{
-				::frame_fragment::ptr_t frag(new ::frame_fragment());
-				frag->receive(link_, boost::protect(boost::bind(&connection::incoming_fragment, shared_from_this(), _1, _2)));
-				return;
-			}
-
-		default:
-			{
-				DLOG(INFO) << "Unknown frame type: " << buffer_cast<const boost::uint8_t*>(link_.received_buffer())[0];
-				google::FlushLogFiles(google::INFO);
-				node_.receive_failure(shared_from_this());
+			else {
+				boost::asio::async_read(link_.socket,
+				                        mutable_buffers_1(link_.receive_buffer()),
+				                        boost::asio::transfer_at_least(1),
+				                        boost::bind(&connection::frame_head_received,
+				                                    shared_from_this(),
+				                                    placeholders::error,
+				                                    placeholders::bytes_transferred));
 				return;
 			}
 		}
@@ -454,6 +477,7 @@ void connection::incoming_packet(packet::ptr_t pkt, std::size_t payload_size)
 	}
 }
 
+#if 0
 void connection::incoming_fragment(frame_fragment::ptr_t frag, std::size_t payload_size)
 {
 	node_.incoming_fragment(shared_from_this(), frag, payload_size);
@@ -461,6 +485,7 @@ void connection::incoming_fragment(frame_fragment::ptr_t frag, std::size_t paylo
 		receive_next_frame();
 	}
 }
+#endif
 
 std::size_t connection::oob_threshold_size()
 {
@@ -479,7 +504,7 @@ void connection::parse_oob_threshold()
 
 	const oob_threshold_frame* frame = buffer_cast<const oob_threshold_frame*>(link_.received_buffer());
 	remote_oob_threshold_ = u32(frame->oob_threshold);
-	update_oob_threshold();
+//	update_oob_threshold();
 
 	link_.consume_receive_buffer(sizeof(oob_threshold_frame));
 }
@@ -490,10 +515,11 @@ void connection::update_local_threshold(boost::posix_time::time_duration duratio
 	// how long this operation took
 	// We cap any increase at the amount of data sent for this operation. This is to prevent
 	// the threshold from overshooting too much on lightly loaded short-thin links.
-	local_oob_threshold_ += std::min(int(double((target_latency.total_milliseconds() - duration.total_milliseconds()))
-	                         / double(target_latency.total_milliseconds())
-	                         * double(local_oob_threshold_)), int(bytes_sent));
-	update_oob_threshold();
+	// FIXME: Overflow/underflow problems abound!
+	local_oob_threshold_ += std::max(std::min(int(double((target_latency.total_milliseconds() - duration.total_milliseconds()))
+	                                          / double(target_latency.total_milliseconds())
+	                                          * double(local_oob_threshold_)), int(bytes_sent)),
+	                                 -int(local_oob_threshold_));
 }
 
 std::size_t connection::successor_size()
@@ -554,7 +580,7 @@ std::size_t do_generate_successor_frame(net_link& link, const Addr& sucessor_add
 
 void connection::send_next_frame(int send_non_packet_frame)
 {
-	if (!outstanding_non_packet_frames_ && packet_queue_.empty() && fragment_queue_.empty() && lifecycle_ == connected) {
+	if (!outstanding_non_packet_frames_ && packet_queue_.empty() && frame_queue_.empty() && lifecycle_ == connected) {
 		outstanding_non_packet_frames_ |= send_non_packet_frame;
 		send_next_frame();
 	}
@@ -611,27 +637,35 @@ void connection::send_next_frame()
 	else if (!packet_queue_.empty()) {
 		DLOG(INFO) << "Sending packet from " << std::string(node_.id()) << " to " << std::string(remote_id());
 
-		const std::vector<const_buffer>& send_buffers = packet_queue_.front().msg->serialize(oob_threshold(), link_.send_buffer());
+		const std::vector<const_buffer>& send_buffers = packet_queue_.front().pkt->serialize(oob_threshold(), link_.send_buffer());
 		std::size_t bytes_transfered = 0;
 		for (std::vector<const_buffer>::const_iterator buf = send_buffers.begin(); buf != send_buffers.end(); ++buf)
 			bytes_transfered += buffer_size(*buf);
 		ack_queue_.push_back(pending_ack(packet_queue_.front().entered, bytes_transfered));
 
-		assert(buffer_cast<const boost::uint8_t*>(send_buffers.front())[0] == 0);
+		assert(buffer_cast<const boost::uint8_t*>(send_buffers[0])[0] == 0);
+		if (packet_queue_.front().pkt->content_status() == packet::content_attached) {
+			assert(buffer_cast<const boost::uint8_t*>(send_buffers[1])[0] == 0);
+			assert(buffer_size(send_buffers[1]) < 24);
+		}
 		DLOG(INFO) << "Sending " << bytes_transfered << " bytes";
 
 		boost::asio::async_write(link_.socket,
 		                         send_buffers,
 		                         boost::bind(&connection::packet_sent, shared_from_this(), placeholders::error, placeholders::bytes_transferred));
 	}
-	else if (!fragment_queue_.empty()) {
+	else if (!frame_queue_.empty()) {
 		DLOG(INFO) << "Sending fragment from " << std::string(node_.id()) << " to " << std::string(remote_id());
 
-		fragment_sent_ = boost::posix_time::microsec_clock::universal_time();
+		const std::vector<const_buffer>& send_buffers = frame_queue_.front().frame->serialize(oob_threshold(), link_.send_buffer());
+		std::size_t bytes_transfered = 0;
+		for (std::vector<const_buffer>::const_iterator buf = send_buffers.begin(); buf != send_buffers.end(); ++buf)
+			bytes_transfered += buffer_size(*buf);
+		ack_queue_.push_back(pending_ack(frame_queue_.front().entered, bytes_transfered));
 
 		boost::asio::async_write(link_.socket,
-		                         packet_queue_.front().msg->serialize(local_oob_threshold_, link_.send_buffer()),
-		                         boost::bind(&connection::fragment_sent, shared_from_this(), placeholders::error, placeholders::bytes_transferred));
+		                         send_buffers,
+		                         boost::bind(&connection::protocol_frame_sent, shared_from_this(), placeholders::error, placeholders::bytes_transferred));
 	}
 }
 
@@ -640,8 +674,6 @@ void connection::packet_sent(const boost::system::error_code& error, std::size_t
 	if (!error && link_.socket.lowest_layer().is_open()) {
 
 		DLOG(INFO) << std::string(node_.id()) << " Sent " << bytes_transfered << " bytes of content";
-
-		assert(buffer_cast<const boost::uint8_t*>(link_.sendable_buffer())[0] == 0);
 
 		node_.sent_content(remote_id(), bytes_transfered);
 		packet_queue_.pop_front();
@@ -659,16 +691,16 @@ void connection::packet_sent(const boost::system::error_code& error, std::size_t
 	}
 }
 
-void connection::fragment_sent(const boost::system::error_code& error, std::size_t bytes_transfered)
+void connection::protocol_frame_sent(const boost::system::error_code& error, std::size_t bytes_transfered)
 {
 	if (!error && link_.socket.lowest_layer().is_open()) {
 
 	//	DLOG(INFO) << std::string(node_.id()) << " Sent " << bytes_transfered << " bytes of content";
-		update_local_threshold(boost::posix_time::microsec_clock::universal_time() - fragment_sent_, bytes_transfered);
+	//	update_local_threshold(boost::posix_time::microsec_clock::universal_time() - frame_sent_, bytes_transfered);
 		node_.sent_content(remote_id(), bytes_transfered);
 
-		if (fragment_queue_.front()->size() == 0)
-			fragment_queue_.pop_front();
+		if (frame_queue_.front().frame->done())
+			frame_queue_.pop_front();
 
 		send_next_frame();
 	}
@@ -686,7 +718,8 @@ void connection::fragment_sent(const boost::system::error_code& error, std::size
 void connection::frame_sent(frame_bits frame_bit, const boost::system::error_code& error, std::size_t bytes_transfered)
 {
 //	DLOG(INFO) << "Sent " << bytes_transfered << " bytes for frame type " << frame_bit;
-	outstanding_non_packet_frames_ &= ~frame_bit;
+	if (!(frame_bit & frame_bit_oob_threshold_update && --ack_sends_needed_))
+		outstanding_non_packet_frames_ &= ~frame_bit;
 
 	if (error) {
 		if (lifecycle_ == connected) {
@@ -722,19 +755,13 @@ void connection::redispatch_send_queue()
 	// the node may have been destroyed
 	if (lifecycle_ != cleanup) {
 		for (std::deque<queued_packet>::iterator it = packet_queue_.begin(); it != packet_queue_.end(); ++it) {
-			packet::ptr_t pkt(boost::dynamic_pointer_cast<packet>(it->msg));
-			if (pkt) {
-				if (pkt->is_direct())
-					// this was a direct request, turn it into an error so the requester gets notified
-					pkt->to_reply(packet::content_failure);
-				node_.dispatch(pkt);
-			}
-			else {
-				// fragments are always direct so unconditionaly reply with an error
-				::frame_fragment::ptr_t frag(boost::dynamic_pointer_cast<::frame_fragment>(it->msg));
-				frag->to_reply();
-				node_.fragment_received(shared_from_this(), frag);
-			}
+			if (it->pkt->is_direct())
+				// this was a direct request, turn it into an error so the requester gets notified
+				it->pkt->to_reply(packet::content_failure);
+			node_.dispatch(it->pkt);
+		}
+		for (std::deque<queued_protocol_frame>::iterator frame = frame_queue_.begin(); frame != frame_queue_.end(); ++frame) {
+			(*frame).frame->send_failure(node_, remote_id());
 		}
 	}
 	packet_queue_.clear();

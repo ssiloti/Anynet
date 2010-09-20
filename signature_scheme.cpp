@@ -111,6 +111,11 @@ void signature_scheme::snoop_packet(packet::ptr_t pkt)
 	}
 }
 
+void signature_scheme::incoming_frame(connection::ptr_t con, boost::uint8_t frame_type)
+{
+	node_.receive_failure(con);
+}
+
 void signature_scheme::drop_crumb(packet::ptr_t pkt, boost::weak_ptr<connection> con)
 {
 	std::pair<crumbs_t::iterator, bool> crumb_entry = crumbs_.insert(std::make_pair(pkt->content_id(), boost::shared_ptr<crumb>()));

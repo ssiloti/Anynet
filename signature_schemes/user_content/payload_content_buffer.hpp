@@ -31,44 +31,48 @@
 //
 // Contact:  Steven Siloti <ssiloti@gmail.com>
 
-#ifndef CONTENT_REQUEST_HPP
-#define CONTENT_REQUEST_HPP
+#ifndef USER_CONTENT_PAYLOAD_CONTENT_BUFFER_HPP
+#define USER_CONTENT_PAYLOAD_CONTENT_BUFFER_HPP
 
-#include "packet.hpp"
-#include "fragment.hpp"
-#include "core.hpp"
-#include <boost/function.hpp>
-#include <boost/optional.hpp>
-#include <queue>
+#include "node.hpp"
 
-class local_node;
-class content_sources;
+namespace user_content
+{
 
-class content_request
+class payload_content_buffer : public sendable_payload
 {
 public:
-	typedef boost::function<void(const_payload_buffer_ptr)> keyed_handler_t;
+	virtual content_size_t content_size() const
+	{
+		return buffer_size(payload->get());
+	}
 
-	content_request(const keyed_handler_t& handler) : receiving_content_(false) { add_handler(handler); }
-	content_request() : receiving_content_(false) {}
+	virtual std::vector<const_buffer> serialize(boost::shared_ptr<packet> pkt, std::size_t threshold, mutable_buffer scratch) const
+	{
+		const_buffer buf = payload->get();
+		if (buffer_size(buf) > threshold) {
+			content_sources::ptr_t self_source(new content_sources(buffer_size(buf)));
+			self_source->sources.insert(std::make_pair(node_.id(), content_sources::source(node_.public_endpoint())));
+			pkt->content_status(packet::content_detached);
+			if (node_.is_v4())
+				pkt->payload(boost::make_shared<payload_content_sources_v4>(self_source));
+			else
+				pkt->payload(boost::make_shared<payload_content_sources_v6>(self_source));
+			return pkt->payload()->serialize(pkt, threshold, scratch);
+		}
+		else {
+			return std::vector<const_buffer>(1, payload->get());
+		}
+	}
 
-	bool snoop_packet(local_node& node, packet::ptr_t pkt);
-	const_payload_buffer_ptr snoop_fragment(local_node& node, ip::tcp::endpoint src, frame_fragment::ptr_t frag);
-	void add_handler(const keyed_handler_t& handler) { handlers_.push_back(handler); }
-	bool timeout(local_node& node, packet::ptr_t pkt);
+	payload_content_buffer(local_node& node, const_payload_buffer_ptr p) : node_(node), payload(p) {}
 
-	void initiate_request(protocol_t protocol, const network_key& key, local_node& node, std::size_t content_size);
-
-	framented_content::fragment_buffer get_fragment_buffer(std::size_t offset, std::size_t size);
+	const_payload_buffer_ptr payload;
 
 private:
-	std::size_t content_size_;
-	std::vector<keyed_handler_t> handlers_;
-	boost::shared_ptr<content_sources> sources_;
-	ip::tcp::endpoint direct_request_pending_;
-	boost::optional<framented_content> partial_content_;
-	network_key last_indirect_request_peer_;
-	bool receiving_content_;
+	local_node& node_;
 };
+
+}
 
 #endif

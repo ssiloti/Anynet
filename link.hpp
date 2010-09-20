@@ -111,6 +111,48 @@ public:
 		return valid_receive_bytes_;
 	}
 
+	template <typename Handler>
+	void make_valid(std::size_t bytes, Handler handler)
+	{
+		if (valid_received_bytes() >= bytes)
+			handler(boost::system::error_code(), 0);
+		else
+			boost::asio::async_read(socket,
+			                        mutable_buffers_1(receive_buffer(bytes)),
+			                        boost::asio::transfer_at_least(bytes - valid_received_bytes()),
+			                        handler);
+	}
+
+	template <typename Handler>
+	void receive_into(std::vector<mutable_buffer> bufs, Handler handler)
+	{
+		std::vector<mutable_buffer>::iterator begin = bufs.begin();
+		while (begin != bufs.end()) {
+			std::size_t consumed = std::min(valid_received_bytes(), buffer_size(*begin));
+			DLOG(INFO) << "Consuming " << consumed;
+			std::memcpy(buffer_cast<void*>(*begin),
+			            buffer_cast<const void*>(received_buffer()),
+			            consumed);
+			consume_receive_buffer(consumed);
+			if (consumed == buffer_size(*begin))
+				++begin;
+			else {
+				(*begin) = (*begin) + consumed;
+				break;
+			}
+		}
+
+		if (begin != bufs.end()) {
+			bufs.erase(bufs.begin(), begin);
+			boost::asio::async_read(socket,
+			                        bufs,
+			                        handler);
+		}
+		else {
+			handler(boost::system::error_code(), 0);
+		}
+	}
+
 	void consume_receive_buffer(std::size_t bytes)
 	{
 		valid_receive_bytes_ -= bytes;
@@ -119,6 +161,7 @@ public:
 #else
 		std::memmove(&receive_buffer_[0], &receive_buffer_[bytes], valid_receive_bytes_);
 #endif
+		DLOG(INFO) << "Consumed " << bytes << " bytes";
 	}
 
 	void received(std::size_t bytes)

@@ -96,18 +96,12 @@ public:
 	template <typename Handler>
 	void receive(net_link& link, Handler handler)
 	{
-		if (link.valid_received_bytes() >= header_size())
-			header_received(link, handler, boost::system::error_code(), 0);
-		else
-			boost::asio::async_read(link.socket,
-			                        mutable_buffers_1(link.receive_buffer(header_size())),
-			                        boost::asio::transfer_at_least(header_size() - link.valid_received_bytes()),
-			                        boost::bind(&packet::header_received<Handler>,
-			                                    shared_from_this(),
-			                                    boost::ref(link),
-			                                    handler,
-			                                    placeholders::error,
-			                                    placeholders::bytes_transferred));
+		link.make_valid(header_size(), boost::bind(&packet::header_received<Handler>,
+			                                       shared_from_this(),
+			                                       boost::ref(link),
+			                                       handler,
+			                                       placeholders::error,
+			                                       placeholders::bytes_transferred));
 	}
 
 	signature_scheme_id sig() const { return sig_scheme_; }
@@ -205,6 +199,8 @@ private:
 			handler(p, payload_size);
 			return;
 		}
+
+		DLOG(INFO) << "Packet header received: dest=" << std::string(destination()) << " status=" << content_status() << " payload size=" << payload_size;
 
 		ptr_t p(shared_from_this());
 		handler(p, payload_size);

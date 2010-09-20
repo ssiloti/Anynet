@@ -34,72 +34,19 @@
 #ifndef FRAGMENT_HPP
 #define FRAGMENT_HPP
 
+#include "fragmented_content.hpp"
+#include "user_content.hpp"
 #include "link.hpp"
 #include "content.hpp"
 #include "hunk.hpp"
 #include <boost/asio/read.hpp>
 #include <boost/asio/write.hpp>
 #include <boost/asio/ip/address.hpp>
-#include <list>
 
-/*
-struct const_content_fragment
+namespace user_content
 {
-	const_content_fragment(content_store::const_mapped_content_ptr c, std::size_t o, std::size_t s) : content_(c), offset(o), buf(c->get() + o, s) {}
-	const std::size_t offset;
-	const const_buffer buf;
-private:
-	const content_store::const_mapped_content_ptr content_;
-};
-*/
 
-class frame_fragment;
-
-class framented_content
-{
-public:
-	typedef boost::shared_ptr<framented_content> ptr_t;
-
-	struct fragment_buffer
-	{
-		friend class framented_content;
-		const std::size_t offset;
-		const mutable_buffer buf;
-		const payload_buffer_ptr content;
-		fragment_buffer(std::size_t o = 0, std::size_t s = 0, payload_buffer_ptr c = payload_buffer_ptr()) : content(c), offset(o), buf(buffer(c->get() + o, s)) {}
-	};
-
-	framented_content(payload_buffer_ptr c) : content_(c) { invalid_.push_back(fragment(0, buffer_size(c->get()), ip::address(), fragment::invalid)); }
-
-	std::pair<std::size_t, std::size_t> next_invalid_range() { if (invalid_.empty()) return std::make_pair(0, 0); return std::make_pair(invalid_.front().offset, invalid_.front().size); }
-	fragment_buffer get_fragment_buffer(std::size_t offset, std::size_t size);
-	void mark_valid(boost::shared_ptr<frame_fragment> frag, ip::address source);
-	const_payload_buffer_ptr complete();
-	void reset();
-
-private:
-	struct fragment
-	{
-		enum fragment_state
-		{
-			invalid,
-			requested,
-			receiving,
-			valid,
-		};
-		fragment(std::size_t o, std::size_t s, ip::address src, fragment_state st) : offset(o), size(s), source(src), state(st) {}
-		std::size_t offset,size;
-		fragment_state state;
-		ip::address source;
-	};
-	std::list<fragment> valid_;
-	std::list<fragment> requested_;
-	std::list<fragment> receiving_;
-	std::list<fragment> invalid_;
-	payload_buffer_ptr content_;
-};
-
-class frame_fragment : public boost::enable_shared_from_this<frame_fragment>, public content_frame
+class frame_fragment : public boost::enable_shared_from_this<frame_fragment>, public protocol_frame
 {
 public:
 	typedef boost::shared_ptr<frame_fragment> ptr_t;
@@ -112,12 +59,20 @@ public:
 		status_failed = 3,
 	};
 
-	frame_fragment(signature_scheme_id proto, content_identifier i, std::size_t o, std::size_t s, const_payload_buffer_ptr payload = const_payload_buffer_ptr())
-		: protocol_(proto), id_(i), offset_(o), size_(s), payload_(payload), status_(payload ? status_attached : status_requested) {}
-	frame_fragment(signature_scheme_id proto, content_identifier i) : protocol_(proto), id_(i), status_(status_failed) {}
-	frame_fragment() : status_(status_failed) {}
+	frame_fragment(signature_scheme_id proto,
+	               content_identifier i,
+	               std::size_t o,
+	               std::size_t s,
+	               const_payload_buffer_ptr payload = const_payload_buffer_ptr())
+		: protocol_(proto), id_(i), offset_(o), size_(s), payload_(payload), status_(payload ? status_attached : status_requested)
+	{}
 
-	signature_scheme_id sig() const { return protocol_; }
+	frame_fragment(signature_scheme_id proto, content_identifier i = content_identifier())
+		: protocol_(proto), id_(i), status_(status_failed) {}
+
+	//frame_fragment() : status_(status_failed) {}
+
+	signature_scheme_id protocol() const { return protocol_; }
 	const content_identifier& id() const { return id_; }
 	std::size_t offset() const { return offset_; }
 	std::size_t size() const { return size_; }
@@ -136,11 +91,14 @@ public:
 
 	virtual std::vector<const_buffer> serialize(std::size_t threshold, mutable_buffer scratch);
 
+	virtual bool done() { return size() == 0 || status() != status_attached; }
+	virtual void send_failure(local_node& node, const network_key& dest);
+
 	template <typename Handler>
-	void receive(net_link& link, Handler handler)
+	void receive_payload(net_link& link, boost::shared_ptr<network_protocol> protocol, Handler handler)
 	{
 		if (link.valid_received_bytes() >= header_size())
-			header_received(link, handler, boost::system::error_code(), 0);
+			header_received(link, protocol, handler, boost::system::error_code(), 0);
 		else
 			boost::asio::async_read(link.socket,
 			                        mutable_buffers_1(link.receive_buffer()),
@@ -148,6 +106,7 @@ public:
 			                        boost::bind(&frame_fragment::header_received<Handler>,
 			                                    shared_from_this(),
 			                                    boost::ref(link),
+			                                    protocol,
 			                                    handler,
 			                                    placeholders::error,
 			                                    placeholders::bytes_transferred));
@@ -173,59 +132,110 @@ public:
 
 private:
 	std::size_t serialize_header(mutable_buffer buf);
-	std::pair<std::size_t, unsigned> parse_header(const_buffer buf);
+	unsigned parse_header(const_buffer buf);
 	std::size_t header_size();
 
 	template <typename Handler>
 	void header_received(net_link& link,
+	                     boost::shared_ptr<network_protocol> protocol,
 	                     Handler handler,
 	                     const boost::system::error_code& error,
 	                     std::size_t bytes_transferred)
 	{
 		if (error || !link.socket.lowest_layer().is_open()) {
 			DLOG(INFO) << "Error receiving fragment frame" << error;
-			ptr_t p;
-			handler(p, bytes_transferred);
+			handler(error, bytes_transferred);
 			return;
 		}
 
-		std::pair<std::size_t, unsigned> name_payload_size = parse_header(link.received_buffer());
-		link.received(header_size());
+		unsigned name_components = parse_header(link.received_buffer());
+		link.received(bytes_transferred);
 		link.consume_receive_buffer(header_size());
 
-		id_.name.receive(name_payload_size.second,
+		id_.name.receive(name_components,
 		                 link,
 		                 boost::protect(boost::bind(&frame_fragment::name_received<Handler>,
 		                                            shared_from_this(),
-		                                            name_payload_size.first,
 		                                            boost::ref(link),
+		                                            protocol,
 		                                            handler,
 		                                            placeholders::error)));
 	}
 
 	template <typename Handler>
-	void name_received(std::size_t payload_size,
-	                   net_link& link,
+	void name_received(net_link& link,
+	                   boost::shared_ptr<network_protocol> protocol,
 	                   Handler handler,
 	                   const boost::system::error_code& error)
 	{
 		if (error || !link.socket.lowest_layer().is_open()
 		    || (status() == status_attached && size() == 0)) {
 			DLOG(INFO) << "Error receiving fragment frame" << error;
-			ptr_t p;
-			handler(p, payload_size);
+			handler(error, 0);
 			return;
 		}
 
-		ptr_t p(shared_from_this());
-		handler(p, payload_size);
+		if (status() == status_attached)
+		{
+			framented_content::fragment_buffer payload = protocol->get_fragment_buffer(shared_from_this());
+
+		#if 0
+			if (buffer_size(payload.buf) == 0) {
+				node_.receive_failure(con);
+				return;
+			}
+		#endif
+
+			assert(payload.offset >= offset());
+			assert(buffer_size(payload.buf) <= size());
+
+			std::vector<mutable_buffer> buffers;
+
+			std::size_t head_excess = payload.offset - offset();
+
+			std::size_t consumable = std::min(head_excess, link.valid_received_bytes());
+			link.consume_receive_buffer(consumable);
+			head_excess -= consumable;
+
+			if (head_excess) {
+				boost::shared_ptr<heap_buffer> head_pad(boost::make_shared<heap_buffer>(head_excess));
+				attach_padding(head_pad);
+				buffers.push_back(head_pad->get());
+			}
+
+			if (buffer_size(payload.buf))
+				buffers.push_back(payload.buf);
+
+			this->payload(payload.content);
+
+			std::size_t tail_excess = size() - buffer_size(payload.buf) - (payload.offset - offset());
+
+		//	tail_excess -= con->discard_payload(tail_excess);
+
+			if (tail_excess) {
+				boost::shared_ptr<heap_buffer> tail_pad(boost::make_shared<heap_buffer>(tail_excess));
+				attach_padding(tail_pad);
+				buffers.push_back(tail_pad->get());
+			}
+		
+			link.receive_into(buffers,
+			                  boost::bind(&frame_fragment::payload_received<Handler>,
+			                              shared_from_this(),
+			                              boost::ref(link),
+			                              handler,
+			                              placeholders::error,
+			                              placeholders::bytes_transferred));
+		}
+		else {
+			handler(error, 0);
+		}
 	}
 
 	template <typename Handler>
 	void payload_received(net_link& link, Handler handler, const boost::system::error_code& error, std::size_t bytes_transferred)
 	{
 		padding_.clear();
-
+#if 0
 		ptr_t p;
 		if (!error && link.socket.is_open()) {
 			p = shared_from_this();
@@ -233,7 +243,8 @@ private:
 		else {
 			DLOG(INFO) << "Error receiving fragment payload" << error;
 		}
-		handler(p);
+#endif
+		handler(error, bytes_transferred);
 	}
 
 	std::size_t offset_, size_;
@@ -243,5 +254,7 @@ private:
 	signature_scheme_id protocol_;
 	fragment_status status_;
 };
+
+}
 
 #endif

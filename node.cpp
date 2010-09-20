@@ -130,15 +130,18 @@ std::vector<connection::ptr_t>::iterator local_node::best_peer(const network_key
 			score *= 1 - 1 / max_closer_peers;
 			share -= 1 - 1 / max_closer_peers;
 
-			double oob_threshold_term = double((*it)->oob_threshold()) / double(max_oob);
-			assert(oob_threshold_term <= 1.0);
-			if (content_size) {
-				score += oob_threshold_term * (share * std::min(1.0, double((*it)->oob_threshold()) / double(content_size)));
-				share -= share * std::min(1.0, double((*it)->oob_threshold()) / double(content_size));
-			}
-			else {
-				score += oob_threshold_term * (share * 0.5);
-				share -= share * 0.5;
+			if (max_oob)
+			{
+				double oob_threshold_term = double((*it)->oob_threshold()) / double(max_oob);
+				assert(oob_threshold_term <= 1.0);
+				if (content_size) {
+					score += oob_threshold_term * (share * std::min(1.0, double((*it)->oob_threshold()) / double(content_size)));
+					share -= share * std::min(1.0, double((*it)->oob_threshold()) / double(content_size));
+				}
+				else {
+					score += oob_threshold_term * (share * 0.5);
+					share -= share * 0.5;
+				}
 			}
 
 			double age_term;
@@ -411,7 +414,7 @@ struct oob_con_ep_cmp
 	ip::tcp::endpoint ep;
 };
 
-void local_node::direct_request(ip::tcp::endpoint peer, frame_fragment::ptr_t frag)
+void local_node::direct_request(ip::tcp::endpoint peer, protocol_frame::ptr_t frag)
 {
 	std::vector<connection::ptr_t>::iterator con_iter = std::find_if(ib_peers_.begin(), ib_peers_.end(), con_ep_cmp(peer));
 	connection::ptr_t con;
@@ -515,6 +518,8 @@ void local_node::packet_received(connection::ptr_t con, packet::ptr_t pkt)
 		return;
 	}
 
+	con->send_ack();
+
 	if (pkt->content_status() == packet::content_attached)
 		traffic_stats_.received_content(con->remote_id(), std::size_t(pkt->payload()->content_size()));
 
@@ -522,7 +527,7 @@ void local_node::packet_received(connection::ptr_t con, packet::ptr_t pkt)
 
 	//con->receive_packet(packet::ptr_t(new packet()), boost::protect(boost::bind(&local_node::incoming_packet, this, con, _1, _2)));
 
-	DLOG(INFO) << std::string(id()) << ": Incoming packet, dest=" << std::string(pkt->destination());
+	DLOG(INFO) << std::string(id()) << ": Incoming packet, dest=" << std::string(pkt->destination()) << " status=" << pkt->content_status();
 
 	if (con->accepts_ib_traffic() && pkt->content_status() == packet::content_requested)
 		sig.drop_crumb(pkt, con);
@@ -691,6 +696,7 @@ void local_node::packet_received(connection::ptr_t con, packet::ptr_t pkt)
 	}
 }
 
+#if 0
 void local_node::incoming_fragment(connection::ptr_t con, frame_fragment::ptr_t frag, std::size_t payload_size)
 {
 	if (!frag) {
@@ -720,6 +726,20 @@ void local_node::fragment_received(connection::ptr_t con, frame_fragment::ptr_t 
 
 	if (incoming_status == frame_fragment::status_requested)
 		direct_request(con->remote_endpoint(), frag);
+}
+#endif
+
+void local_node::incoming_protocol_frame(connection::ptr_t con, signature_scheme_id sig, boost::uint8_t frame_type)
+{
+	signature_scheme::ptr_t protocol_handler = validate_protocol(sig);
+
+	if (!protocol_handler)
+	{
+		receive_failure(con);
+		return;
+	}
+
+	protocol_handler->incoming_frame(con, frame_type);
 }
 
 void local_node::recompute_identity()
@@ -845,6 +865,7 @@ void local_node::disconnect_peer(connection::ptr_t con)
 		std::vector<connection::ptr_t>::iterator peer = std::find(ib_peers_.begin(), ib_peers_.end(), con);
 
 		if (peer != ib_peers_.end()) {
+			google::FlushLogFiles(google::INFO);
 			DLOG(INFO) << std::string(id()) << " Disconnecting in-band peer: " << std::string(con->remote_id());
 
 			if (closest_peer<reverse_distance>(id() - 1, id() + 1, id()) == peer) {
@@ -961,14 +982,14 @@ hunk_descriptor_t local_node::cache_store(signature_scheme_id pid, content_ident
 {
 	int closer = closer_peers(id.publisher);
 
-	if (closer < 2) {
+//	if (closer < 2) {
 		try_prune_cache(size, closer, boost::posix_time::time_duration(0, 0, 0, 0));
 		stored_hunks_.push_back(stored_hunk(pid, id, size, closer, false));
 		stored_size_ += size;
 		return --stored_hunks_.end();
-	}
+//	}
 
-	return stored_hunks_.end();
+//	return stored_hunks_.end();
 }
 
 bool local_node::try_prune_cache(std::size_t size, int closer_peers, boost::posix_time::time_duration age)

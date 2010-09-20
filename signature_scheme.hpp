@@ -48,7 +48,7 @@
 
 class local_node;
 
-struct content_sources : boost::enable_shared_from_this<content_sources>
+struct content_sources : public boost::enable_shared_from_this<content_sources>
 {
 	typedef boost::shared_ptr<content_sources> ptr_t;
 
@@ -197,7 +197,7 @@ public:
 	}
 
 	void snoop_packet(packet::ptr_t pkt);
-	void snoop_fragment(const network_key& src, frame_fragment::ptr_t frag);
+	virtual void incoming_frame(connection::ptr_t con, boost::uint8_t frame_type);
 
 	virtual void prune_hunk(const content_identifier& id) {}
 
@@ -211,6 +211,11 @@ public:
 	boost::optional<const crumb::requesters_t&> get_crumb(packet::ptr_t pkt);
 
 	virtual void shutdown() { shutting_down_ = true; crumbs_.clear(); }
+
+	template <typename T>
+	boost::shared_ptr<T> shared_from_this_as() { return boost::static_pointer_cast<T>(shared_from_this()); }
+	template <typename T>
+	boost::shared_ptr<T const> shared_from_this_as() const { return boost::static_pointer_cast<T const>(shared_from_this()); }
 
 protected:
 	typedef std::map<content_identifier, boost::array<boost::posix_time::ptime, 2> > content_requests_t;
@@ -237,17 +242,6 @@ protected:
 
 private:
 	void vacume_sources(const boost::system::error_code& error = boost::system::error_code());
-};
-
-class fragmented_protocol : public signature_scheme
-{
-public:
-	typedef boost::shared_ptr<fragmented_protocol> ptr_t;
-
-	fragmented_protocol(local_node& node, signature_scheme_id p) : signature_scheme(node, p) {}
-
-	virtual void incoming_fragment(connection::ptr_t con, frame_fragment::ptr_t frag, std::size_t payload_size) = 0;
-	virtual void snoop_fragment(const network_key& src, frame_fragment::ptr_t frag) = 0;
 };
 
 template <typename Addr>
@@ -278,7 +272,7 @@ public:
 			++source;
 		}
 
-		return std::vector<const_buffer>(1, buffer(scratch, sizeof(packed_detached_sources) + sizeof(packed_source_address) * (source_send_count-1)));
+		return std::vector<const_buffer>(1, buffer(scratch, sizeof(packed_detached_sources) + sizeof(packed_source_address) * source_send_count));
 	}
 
 
@@ -293,7 +287,7 @@ public:
 		for (int source_idx = 0; source_idx < sources_count; ++source_idx) {
 			sources->sources.insert(decode_detached_source(&s->sources[source_idx]));
 		}
-		return sizeof(packed_detached_sources) + sizeof(packed_source_address) * (sources_count - 1);
+		return sizeof(packed_detached_sources) + sizeof(packed_source_address) * sources_count;
 	}
 
 	payload_content_sources(content_sources::ptr_t s) : content_sources::ptr_t(s) {}
@@ -313,7 +307,7 @@ private:
 		boost::uint8_t size[8];
 		boost::uint8_t rsvd[2];
 		boost::uint8_t count[2];
-		packed_source_address sources[1];
+		packed_source_address sources[];
 	};
 
 	void encode_detached_source(packed_source_address* packed_address, const content_sources::sources_t::value_type& src) const

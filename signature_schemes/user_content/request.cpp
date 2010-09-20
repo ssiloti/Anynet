@@ -31,26 +31,27 @@
 //
 // Contact:  Steven Siloti <ssiloti@gmail.com>
 
-#include "content_request.hpp"
-#include "protocols/user_content.hpp"
+#include "payload_content_buffer.hpp"
+#include "request.hpp"
+#include "fragment.hpp"
 #include "node.hpp"
 
-#ifdef SIMULATION
-#include "simulator.hpp"
-#endif
+using namespace user_content;
 
-void content_request::initiate_request(protocol_t protocol, const network_key& key, local_node& node, std::size_t content_size)
+void content_request::initiate_request(signature_scheme_id sig, const content_identifier& key, local_node& node, content_size_t content_size)
 {
 	last_indirect_request_peer_ = node.id();
 	content_size_ = content_size;
 
 	packet::ptr_t pkt(new packet());
-	pkt->protocol(protocol);
+	pkt->sig(sig);
 	pkt->source(node.id());
-	pkt->destination(key);
-	pkt->payload(packet::content_requested, new payload_content_request(content_size_));
+	pkt->destination(key.publisher);
+	pkt->name(key.name);
+	pkt->content_status(packet::content_requested);
+	pkt->payload(boost::make_shared<payload_request>(content_size_));
 
-	connection::ptr_t con = node.local_request(pkt, key);
+	connection::ptr_t con = node.local_request(pkt, key.publisher);
 
 	if (con)
 		last_indirect_request_peer_ = con->remote_id() - 1;
@@ -62,31 +63,47 @@ bool content_request::snoop_packet(local_node& node, packet::ptr_t pkt)
 	{
 	case packet::content_attached:
 		for (std::vector<keyed_handler_t>::iterator handler = handlers_.begin(); handler != handlers_.end(); ++handler)
-			(*handler)(pkt->payload_as<());
+			(*handler)(pkt->payload_as<payload_content_buffer>()->payload);
 		return true;
 	case packet::content_detached:
-		sources_ = pkt->sources();
-		if (direct_request_pending_ == ip::tcp::endpoint()) {
+		sources_ = *pkt->payload_as<content_sources::ptr_t>();
+		if (!direct_request_pending_) {
 			if (!partial_content_) {
-				partial_content_ = framented_content(node.get_protocol(pkt).get_payload_buffer(sources_->size));
+				// For now we can't download content which is larger than size_t
+				// this would require modifications in the hunk store to do partial mapping
+				if (sources_->size > std::numeric_limits<std::size_t>::max()) {
+					for (std::vector<keyed_handler_t>::iterator handler = handlers_.begin(); handler != handlers_.end(); ++handler)
+						(*handler)(const_payload_buffer_ptr());
+					return true;
+				}
+				partial_content_ = framented_content(static_cast<network_protocol*>(&node.get_protocol(pkt))->get_payload_buffer(std::size_t(sources_->size)));
 			}
 			std::pair<std::size_t, std::size_t> range = partial_content_->next_invalid_range();
-			frame_fragment::ptr_t frag(new frame_fragment(pkt->protocol(), pkt->source(), range.first, range.second));
-			node.direct_request(sources_->sources.begin()->first, frag);
-			direct_request_pending_ = sources_->sources.begin()->first;
+			frame_fragment::ptr_t frag(new frame_fragment(pkt->sig(), pkt->content_id(), range.first, range.second));
+			node.direct_request(sources_->sources.begin()->second.ep, frag);
+			++sources_->sources.begin()->second.active_request_count;
+			direct_request_pending_ = true;
+			direct_request_peer_ = sources_->sources.begin()->first;
 		}
 		return false;
 	case packet::content_failure:
-		if ( ( !sources_ || sources_->sources.size() == 0 ) && ( direct_request_pending_ == ip::tcp::endpoint() ) ) {
+		if (pkt->source() == direct_request_peer_) {
+			sources_->sources.erase(direct_request_peer_);
+			direct_request_pending_ = false;
+		}
+
+		if ( !direct_request_pending_ ) {
+
 
 			pkt->destination(pkt->source());
 			pkt->source(node.id());
-			pkt->payload(packet::content_requested, new payload_content_request(content_size_));
+			pkt->content_status(packet::content_requested);
+			pkt->payload(boost::make_shared<payload_request>(content_size_));
 
 			connection::ptr_t con = node.local_request(pkt, last_indirect_request_peer_);
 
 			if (con) {
-				DLOG(INFO) << "Retrying request for " << std::string(pkt->destination()) << " to " << std::string(con->remote_id()) << " with inner id " << std::string(last_indirect_request_peer_);
+				DLOG(INFO) << "Retrying content_request for " << std::string(pkt->destination()) << " to " << std::string(con->remote_id()) << " with inner id " << std::string(last_indirect_request_peer_);
 				last_indirect_request_peer_ = con->remote_id() - 1;
 				return false;
 			}
@@ -97,13 +114,7 @@ bool content_request::snoop_packet(local_node& node, packet::ptr_t pkt)
 				return true;
 			}
 		}
-		else if (pkt->source() == network_key(direct_request_pending_)) {
-			sources_->sources.erase(direct_request_pending_);
-
-			std::pair<std::size_t, std::size_t> range = partial_content_->next_invalid_range();
-			frame_fragment::ptr_t frag(new frame_fragment(pkt->protocol(), pkt->source(), range.first, range.second));
-			node.direct_request(sources_->sources.begin()->first, frag);
-			direct_request_pending_ = sources_->sources.begin()->first;
+		else {
 			return false;
 		}
 	default:
@@ -111,7 +122,7 @@ bool content_request::snoop_packet(local_node& node, packet::ptr_t pkt)
 	}
 }
 
-const_payload_buffer_ptr content_request::snoop_fragment(local_node& node, ip::tcp::endpoint src, frame_fragment::ptr_t frag)
+const_payload_buffer_ptr content_request::snoop_fragment(local_node& node, const network_key& src, frame_fragment::ptr_t frag)
 {
 	if (!partial_content_) {
 		// We got a fragment frame for something we haven't started a fragmented download on yet
@@ -120,19 +131,21 @@ const_payload_buffer_ptr content_request::snoop_fragment(local_node& node, ip::t
 		return const_payload_buffer_ptr();
 	}
 
-	direct_request_pending_ = ip::tcp::endpoint();
+	content_sources::sources_t::iterator content_source = sources_->sources.find(src);
+
+	direct_request_pending_ = false;
+	--content_source->second.active_request_count;
 
 	switch (frag->status())
 	{
 	case frame_fragment::status_attached:
 		{
-			partial_content_->mark_valid(frag, src.address());
+			partial_content_->mark_valid(frag, content_source->second.ep.address());
 
 			const_payload_buffer_ptr payload = partial_content_->complete();
 
 			if (payload) {
-				network_key pid(payload->get());
-				if (pid == frag->id())
+				if (static_cast<network_protocol*>(&node.get_protocol(frag->protocol()))->content_id(payload) == frag->id())
 					return payload;
 				else
 					partial_content_->reset();
@@ -141,9 +154,10 @@ const_payload_buffer_ptr content_request::snoop_fragment(local_node& node, ip::t
 		}
 	case frame_fragment::status_failed:
 		if (sources_) {
-			sources_->sources.erase(src);
-			if (!sources_->sources.empty())
-				src = sources_->sources.begin()->first;
+			sources_->sources.erase(content_source);
+			if (!sources_->sources.empty()) {
+				content_source = sources_->sources.begin();
+			}
 			else
 				return const_payload_buffer_ptr();
 		}
@@ -152,7 +166,10 @@ const_payload_buffer_ptr content_request::snoop_fragment(local_node& node, ip::t
 
 	std::pair<std::size_t, std::size_t> next_range(partial_content_->next_invalid_range());
 	frag->to_request(next_range.first, next_range.second);
-	direct_request_pending_ = src;
+	node.direct_request(content_source->second.ep, frag);
+	++content_source->second.active_request_count;
+	direct_request_pending_ = true;
+	direct_request_peer_ = content_source->first;
 
 	return const_payload_buffer_ptr();
 }
@@ -167,12 +184,13 @@ framented_content::fragment_buffer content_request::get_fragment_buffer(std::siz
 
 bool content_request::timeout(local_node& node, packet::ptr_t pkt)
 {
-	if (direct_request_pending_ != ip::tcp::endpoint()) {
-		frame_fragment::ptr_t frag(new frame_fragment());
-		snoop_fragment(node, direct_request_pending_, frag);
+	if (direct_request_pending_) {
+		frame_fragment::ptr_t frag(new frame_fragment(pkt->sig()));
+		snoop_fragment(node, direct_request_peer_, frag);
 		if (frag->status() != frame_fragment::status_failed)
 			return false;
 	}
 
 	return snoop_packet(node, pkt);
 }
+

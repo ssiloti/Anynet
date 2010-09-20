@@ -31,7 +31,7 @@
 //
 // Contact:  Steven Siloti <ssiloti@gmail.com>
 
-#include "signature_schemes/non_authoritative.hpp"
+#include "signature_schemes/user_content/non_authoritative.hpp"
 #include "node.hpp"
 
 struct packed_content
@@ -69,7 +69,7 @@ const_buffer non_authoritative::insert_buffer::get() const
 }
 
 non_authoritative::non_authoritative(local_node& node)
-	: user_content(node, protocol_id), stored_hunks_(node.config().content_store_path() + "/non_authoritative", protocol_id, node)
+	: user_content::network_protocol(node, protocol_id), stored_hunks_(node.config().content_store_path() + "/non_authoritative", protocol_id, node)
 {
 }
 
@@ -110,9 +110,6 @@ content_identifier non_authoritative::content_id(const_payload_buffer_ptr conten
 	net_hash root_hash;
 	for (const boost::uint8_t* chunk = c->content; chunk < end_of_content ; chunk += chunk_size)
 		root_hash.update(net_hash(const_buffer(chunk, std::min(chunk_size, size_t(end_of_content - chunk)))));
-
-	if (chunk_size == content_size)
-		assert(network_key(root_hash) == network_key(net_hash(net_hash(const_buffer(c->content, content_size)).final())));
 
 	return network_key(root_hash);
 }

@@ -37,7 +37,7 @@
 #include <glog/logging.h>
 
 #include "hunk.hpp"
-#include "signature_schemes/user_content.hpp"
+#include "user_content.hpp"
 #include "key.hpp"
 #include "node.hpp"
 #include <boost/smart_ptr.hpp>
@@ -47,7 +47,7 @@
 #include "simulator.hpp"
 #endif
 
-class non_authoritative : public user_content
+class non_authoritative : public user_content::network_protocol
 {
 public:
 	static const signature_scheme_id protocol_id = signature_sha256;

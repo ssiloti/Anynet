@@ -19,6 +19,12 @@
     <Filter Include="Source Files\Signature">
       <UniqueIdentifier>{9cf2e354-8efc-498e-9ba7-77c70de25ccf}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Header Files\Signature\User Content">
+      <UniqueIdentifier>{d4711511-8248-4359-81f0-de2c27b35298}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Signature\User Content">
+      <UniqueIdentifier>{8d57990e-afe3-4458-bd61-ffd9b33dfedc}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\signature_scheme.hpp">
@@ -34,9 +40,6 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\field_utils.hpp">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="..\fragment.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\known_peers.hpp">
@@ -63,15 +66,6 @@
     <ClInclude Include="simulator.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\signature_schemes\user_content.hpp">
-      <Filter>Header Files\Signature</Filter>
-    </ClInclude>
-    <ClInclude Include="..\signature_schemes\indirect_credit.hpp">
-      <Filter>Header Files\Signature</Filter>
-    </ClInclude>
-    <ClInclude Include="..\signature_schemes\non_authoritative.hpp">
-      <Filter>Header Files\Signature</Filter>
-    </ClInclude>
     <ClInclude Include="..\hunk.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -83,6 +77,30 @@
     </ClInclude>
     <ClInclude Include="..\content.hpp">
       <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\signature_schemes\user_content\fragment.hpp">
+      <Filter>Header Files\Signature\User Content</Filter>
+    </ClInclude>
+    <ClInclude Include="..\signature_schemes\user_content\non_authoritative.hpp">
+      <Filter>Header Files\Signature\User Content</Filter>
+    </ClInclude>
+    <ClInclude Include="..\signature_schemes\user_content\user_content.hpp">
+      <Filter>Header Files\Signature\User Content</Filter>
+    </ClInclude>
+    <ClInclude Include="..\signature_schemes\user_content\user_content_fwd.hpp">
+      <Filter>Header Files\Signature\User Content</Filter>
+    </ClInclude>
+    <ClInclude Include="..\signature_schemes\user_content\fragmented_content.hpp">
+      <Filter>Header Files\Signature\User Content</Filter>
+    </ClInclude>
+    <ClInclude Include="..\signature_schemes\user_content\request.hpp">
+      <Filter>Header Files\Signature\User Content</Filter>
+    </ClInclude>
+    <ClInclude Include="..\signature_schemes\user_content\payload_content_buffer.hpp">
+      <Filter>Header Files\Signature\User Content</Filter>
+    </ClInclude>
+    <ClInclude Include="..\signature_schemes\indirect_credit.hpp">
+      <Filter>Header Files\Signature</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -96,9 +114,6 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\core.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\fragment.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\hunk.cpp">
@@ -125,14 +140,23 @@
     <ClCompile Include="simulator.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\signature_schemes\user_content.cpp">
-      <Filter>Source Files\Signature</Filter>
-    </ClCompile>
     <ClCompile Include="..\signature_schemes\indirect_credit.cpp">
       <Filter>Source Files\Signature</Filter>
     </ClCompile>
-    <ClCompile Include="..\signature_schemes\non_authoritative.cpp">
-      <Filter>Source Files\Signature</Filter>
+    <ClCompile Include="..\signature_schemes\user_content\fragment.cpp">
+      <Filter>Source Files\Signature\User Content</Filter>
+    </ClCompile>
+    <ClCompile Include="..\signature_schemes\user_content\non_authoritative.cpp">
+      <Filter>Source Files\Signature\User Content</Filter>
+    </ClCompile>
+    <ClCompile Include="..\signature_schemes\user_content\user_content.cpp">
+      <Filter>Source Files\Signature\User Content</Filter>
+    </ClCompile>
+    <ClCompile Include="..\signature_schemes\user_content\fragmented_content.cpp">
+      <Filter>Source Files\Signature\User Content</Filter>
+    </ClCompile>
+    <ClCompile Include="..\signature_schemes\user_content\request.cpp">
+      <Filter>Source Files\Signature\User Content</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

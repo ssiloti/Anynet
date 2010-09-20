@@ -50,8 +50,8 @@ bool content_sources::source_cmp::operator()(const source& l, const source& r)
 struct packed_header
 {
 	boost::uint8_t frame_type;
-	boost::uint8_t sig_scheme[2];
 	boost::uint8_t status_name_components;
+	boost::uint8_t sig_scheme[2];
 	boost::uint8_t destination[network_key::packed_size];
 	boost::uint8_t payload_size[8];
 };
@@ -68,6 +68,14 @@ std::pair<content_size_t, unsigned> packet::parse_header(const_buffer buf)
 	content_status(content_status_t((header->status_name_components & 0xC0) >> 6));
 	sig(u16(header->sig_scheme));
 	destination(network_key(header->destination));
+
+	if (content_status() == content_attached)
+		assert(u64(header->payload_size) < 24);
+	else {
+		google::FlushLogFiles(google::INFO);
+		assert(u64(header->payload_size) < 256);
+	}
+
 	return std::make_pair(u64(header->payload_size), header->status_name_components & 0x3F);
 }
 
@@ -90,18 +98,24 @@ std::vector<const_buffer> packet::serialize(std::size_t threshold,mutable_buffer
 	std::vector<const_buffer> buffers;
 	buffers.push_back(buffer(scratch, serialize_header(scratch)));
 
+	content_size_t payload_size = 0;
+	packed_header* h = buffer_cast<packed_header*>(scratch);
+
 	if (payload_.get() != NULL) {
 		const std::vector<const_buffer>& payload_buffers = payload_->serialize(shared_from_this(), threshold, scratch + buffer_size(buffers.back()));
 
-		content_size_t payload_size = 0;
 		for (std::vector<const_buffer>::const_iterator pbuf = payload_buffers.begin(); pbuf != payload_buffers.end(); ++pbuf)
 			payload_size += buffer_size(*pbuf);
-		u64(buffer_cast<packed_header*>(scratch)->payload_size, payload_size);
-
+		// HACK: The payload may have decided to change our status, update it here
+		h->status_name_components = (content_status() << 6) | name().component_count();
 		buffers.insert(buffers.end(), payload_buffers.begin(), payload_buffers.end());
 	}
 
+	u64(h->payload_size, payload_size);
+
 	assert(buffer_cast<packed_header*>(scratch)->frame_type == connection::frame_network_packet);
+	google::FlushLogFiles(google::INFO);
+	assert(payload_size < 256);
 	
 	return buffers;
 }

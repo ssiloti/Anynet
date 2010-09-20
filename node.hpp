@@ -39,6 +39,7 @@
 #include "known_peers.hpp"
 #include "connection.hpp"
 #include "signature_scheme.hpp"
+#include "hunk.hpp"
 #include "authority.hpp"
 #include "config.hpp"
 #include <boost/asio/deadline_timer.hpp>
@@ -133,7 +134,7 @@ public:
 		return *boost::static_pointer_cast<P>( protocol_handlers_.find(P::protocol_id)->second );
 	}
 	signature_scheme& get_protocol(packet::ptr_t pkt) { return get_protocol(pkt->sig()); }
-	signature_scheme& get_protocol(frame_fragment::ptr_t frag) { return get_protocol(frag->sig()); }
+//	signature_scheme& get_protocol(frame_fragment::ptr_t frag) { return get_protocol(frag->sig()); }
 	signature_scheme& get_protocol(signature_scheme_id pid) { return *protocol_handlers_.find(pid)->second; }
 
 	bool register_protocol_handler(signature_scheme_id id, signature_scheme::ptr_t proto)
@@ -150,7 +151,7 @@ public:
 	int closer_peers(const network_key& key) const;
 
 	// requests
-	void direct_request(ip::tcp::endpoint peer, frame_fragment::ptr_t frag);
+	void direct_request(ip::tcp::endpoint peer, protocol_frame::ptr_t frag);
 	connection::ptr_t local_request(packet::ptr_t pkt);
 	connection::ptr_t local_request(packet::ptr_t pkt, const network_key& inner_id);
 	connection::ptr_t dispatch(packet::ptr_t pkt);
@@ -162,8 +163,10 @@ public:
 	void incoming_packet(connection::ptr_t con, packet::ptr_t pkt, std::size_t payload_size);
 	void packet_received(connection::ptr_t con, packet::ptr_t pkt);
 
-	void incoming_fragment(connection::ptr_t con, frame_fragment::ptr_t frag, std::size_t payload_size);
-	void fragment_received(connection::ptr_t con, frame_fragment::ptr_t frag);
+//	void incoming_fragment(connection::ptr_t con, frame_fragment::ptr_t frag, std::size_t payload_size);
+//	void fragment_received(connection::ptr_t con, frame_fragment::ptr_t frag);
+
+	void incoming_protocol_frame(connection::ptr_t con, signature_scheme_id sig, boost::uint8_t frame_type);
 
 	// failures
 	void send_failure(connection::ptr_t con);

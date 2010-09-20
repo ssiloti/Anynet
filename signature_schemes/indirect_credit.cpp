@@ -346,7 +346,7 @@ private:
 };
 
 indirect_credit::indirect_credit(local_node& node)
-	: signature_scheme(node, protocol_id), store_(node.io_service(), node.config().content_store_path() + "/indirect_credits")
+	: network_protocol(node, protocol_id), store_(node.io_service(), node.config().content_store_path() + "/indirect_credits")
 {}
 
 void indirect_credit::receive_attached_content(connection::ptr_t con, packet::ptr_t pkt, std::size_t payload_size)

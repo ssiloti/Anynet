@@ -58,8 +58,8 @@ class local_node;
 
 struct stored_hunk
 {
-	stored_hunk(signature_scheme_id p, content_identifier k, std::size_t s, int closer, bool local)
-		: sig(p), id(k), size(s), closer_peers(closer), local_requested(local),
+	stored_hunk(protocol_id p, content_identifier k, std::size_t s, int closer, bool local)
+		: protocol(p), id(k), size(s), closer_peers(closer), local_requested(local),
 		last_access(boost::posix_time::second_clock::universal_time()),
 		stored(boost::posix_time::second_clock::universal_time())
 	{}
@@ -69,7 +69,7 @@ struct stored_hunk
 	std::size_t size;
 	int closer_peers;
 	bool local_requested;
-	signature_scheme_id sig;
+	protocol_id protocol;
 };
 
 typedef std::list<stored_hunk> stored_hunks_t;
@@ -148,7 +148,7 @@ private:
 public:
 	typedef stored_contents_t::const_iterator const_iterator;
 
-	content_store(const std::string& path, signature_scheme_id pid, local_node& node)
+	content_store(const std::string& path, protocol_id pid, local_node& node)
 		: path_(path), db_(NULL, 0)
 	{
 		boost::filesystem::create_directories(boost::filesystem::path(path_));
@@ -190,7 +190,7 @@ public:
 	void unlink(const content_identifier& key);
 
 private:
-	void load_contents(boost::filesystem::path dir_path, signature_scheme_id pid, local_node& node);
+	void load_contents(boost::filesystem::path dir_path, protocol_id pid, local_node& node);
 
 	void generate_db_key(const content_identifier& id, std::vector<boost::uint8_t>& buf);
 

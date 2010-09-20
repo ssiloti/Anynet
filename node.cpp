@@ -334,18 +334,18 @@ void local_node::bootstrap()
 		make_connection(seed_peer);
 }
 
-std::vector<signature_scheme_id> local_node::supported_protocols() const
+std::vector<protocol_id> local_node::supported_protocols() const
 {
 	return supported_protocols_;
 }
 
-signature_scheme::ptr_t local_node::validate_protocol(signature_scheme_id sig)
+network_protocol::ptr_t local_node::validate_protocol(protocol_id protocol)
 {
-	protocol_handlers_t::iterator protocol_handler = protocol_handlers_.find(sig);
+	protocol_handlers_t::iterator protocol_handler = protocol_handlers_.find(protocol);
 
 	if (protocol_handler == protocol_handlers_.end())
 	{
-		protocol_handler = protocol_handlers_.insert(std::make_pair(sig, boost::make_shared<signature_scheme>(boost::ref(*this), sig))).first;
+		protocol_handler = protocol_handlers_.insert(std::make_pair(protocol, boost::make_shared<network_protocol>(boost::ref(*this), protocol))).first;
 	}
 
 	return protocol_handler->second;
@@ -441,11 +441,11 @@ void local_node::direct_request(ip::tcp::endpoint peer, protocol_frame::ptr_t fr
 
 void local_node::snoop(packet::ptr_t pkt)
 {
-	protocol_handlers_t::iterator protocol_handler = protocol_handlers_.find(pkt->sig());
+	protocol_handlers_t::iterator protocol_handler = protocol_handlers_.find(pkt->protocol());
 
 	if (protocol_handler == protocol_handlers_.end()) {
 		// TODO: Turn the packet around with an error, for now just drop it
-		DLOG(INFO) << "Unknown packet signature format! " << pkt->sig();
+		DLOG(INFO) << "Unknown packet signature format! " << pkt->protocol();
 		return;
 	}
 
@@ -499,7 +499,7 @@ void local_node::incoming_packet(connection::ptr_t con, packet::ptr_t pkt, std::
 		return;
 	}
 
-	signature_scheme::ptr_t protocol_handler = validate_protocol(pkt->sig());
+	network_protocol::ptr_t protocol_handler = validate_protocol(pkt->protocol());
 
 	if (!protocol_handler)
 	{
@@ -523,14 +523,14 @@ void local_node::packet_received(connection::ptr_t con, packet::ptr_t pkt)
 	if (pkt->content_status() == packet::content_attached)
 		traffic_stats_.received_content(con->remote_id(), std::size_t(pkt->payload()->content_size()));
 
-	signature_scheme& sig = get_protocol(pkt);
+	network_protocol& protocol = get_protocol(pkt);
 
 	//con->receive_packet(packet::ptr_t(new packet()), boost::protect(boost::bind(&local_node::incoming_packet, this, con, _1, _2)));
 
 	DLOG(INFO) << std::string(id()) << ": Incoming packet, dest=" << std::string(pkt->destination()) << " status=" << pkt->content_status();
 
 	if (con->accepts_ib_traffic() && pkt->content_status() == packet::content_requested)
-		sig.drop_crumb(pkt, con);
+		protocol.drop_crumb(pkt, con);
 	else if (!con->accepts_ib_traffic()) {
 		std::vector<oob_peer::ptr_t>::iterator oob_peer_iter = std::find_if(oob_peers_.begin(), oob_peers_.end(), oob_con_ep_cmp(con->remote_endpoint()));
 		if (oob_peer_iter != oob_peers_.end())
@@ -551,14 +551,14 @@ void local_node::packet_received(connection::ptr_t con, packet::ptr_t pkt)
 		// in any case send the packet directly back at him
 		// we can't use dispatch because he might be oob
 		con->send(pkt);
-		sig.pickup_crumb(pkt);
+		protocol.pickup_crumb(pkt);
 		return;
 	}
 
 	if (!con->accepts_ib_traffic()) {
 		// This packet is from an out-of-band peer, yet we didn't have a reply
 		// Return an error
-		sig.to_content_location_failure(pkt);
+		protocol.to_content_location_failure(pkt);
 		con->send(pkt);
 		return;
 	}
@@ -584,9 +584,9 @@ void local_node::packet_received(connection::ptr_t con, packet::ptr_t pkt)
 			bool done = true;
 
 			if (target != ib_peers_.end()) {
-				boost::optional<const signature_scheme::crumb::requesters_t&> requesters = sig.get_crumb(pkt);
+				boost::optional<const network_protocol::crumb::requesters_t&> requesters = protocol.get_crumb(pkt);
 				if (requesters) {
-					for (signature_scheme::crumb::requesters_t::const_iterator requester = requesters->begin();
+					for (network_protocol::crumb::requesters_t::const_iterator requester = requesters->begin();
 						    requester != requesters->end();
 						    ++requester) {
 						if (*target == requester->second.lock()) {
@@ -606,7 +606,7 @@ void local_node::packet_received(connection::ptr_t con, packet::ptr_t pkt)
 			// we don't want this packet going back through the normal dispatch path
 			pkt->mark_direct();
 
-			sig.request_from_location_failure(pkt);
+			protocol.request_from_location_failure(pkt);
 			(*target)->send(pkt);
 			return;
 		}
@@ -614,10 +614,10 @@ void local_node::packet_received(connection::ptr_t con, packet::ptr_t pkt)
 	}
 
 	if (pkt->content_status() != packet::content_requested) {
-		boost::optional<const signature_scheme::crumb::requesters_t&> requesters = sig.get_crumb(pkt);
+		boost::optional<const network_protocol::crumb::requesters_t&> requesters = protocol.get_crumb(pkt);
 		if (requesters) {
 			bool destination_found = false;
-			for (signature_scheme::crumb::requesters_t::const_iterator requester = requesters->begin();
+			for (network_protocol::crumb::requesters_t::const_iterator requester = requesters->begin();
 			     requester != requesters->end();
 			     ++requester)
 			{
@@ -660,9 +660,9 @@ void local_node::packet_received(connection::ptr_t con, packet::ptr_t pkt)
 				bool done = true;
 
 				if (target != ib_peers_.end()) {
-					boost::optional<const signature_scheme::crumb::requesters_t&> requesters = sig.get_crumb(pkt);
+					boost::optional<const network_protocol::crumb::requesters_t&> requesters = protocol.get_crumb(pkt);
 					if (requesters) {
-						for (signature_scheme::crumb::requesters_t::const_iterator requester = requesters->begin();
+						for (network_protocol::crumb::requesters_t::const_iterator requester = requesters->begin();
 						     requester != requesters->end();
 						     ++requester) {
 							if (*target == requester->second.lock()) {
@@ -682,16 +682,16 @@ void local_node::packet_received(connection::ptr_t con, packet::ptr_t pkt)
 				(*target)->send(pkt);
 			}
 			else {
-				sig.to_content_location_failure(pkt);
+				protocol.to_content_location_failure(pkt);
 				con->send(pkt);
-				sig.pickup_crumb(pkt);
+				protocol.pickup_crumb(pkt);
 			}
 		}
 	}
 	else if (pkt->content_status() == packet::content_requested) {
 		// peer is closer than us to the destination and we couldn't satisfy it ourselves, we can't foward this
 		// so return an error
-		sig.to_content_location_failure(pkt);
+		protocol.to_content_location_failure(pkt);
 		con->send(pkt);
 	}
 }
@@ -705,7 +705,7 @@ void local_node::incoming_fragment(connection::ptr_t con, frame_fragment::ptr_t 
 		return;
 	}
 
-	fragmented_protocol::ptr_t protocol_handler = boost::dynamic_pointer_cast<fragmented_protocol>(validate_protocol(frag->sig()));
+	fragmented_protocol::ptr_t protocol_handler = boost::dynamic_pointer_cast<fragmented_protocol>(validate_protocol(frag->protocol()));
 
 	if (!protocol_handler) {
 		receive_failure(con);
@@ -722,16 +722,16 @@ void local_node::fragment_received(connection::ptr_t con, frame_fragment::ptr_t 
 	if (incoming_status == frame_fragment::status_attached)
 		traffic_stats_.received_content(con->remote_id(), frag->size());
 
-	boost::static_pointer_cast<fragmented_protocol>(validate_protocol(frag->sig()))->snoop_fragment(con->remote_id(), frag);
+	boost::static_pointer_cast<fragmented_protocol>(validate_protocol(frag->protocol()))->snoop_fragment(con->remote_id(), frag);
 
 	if (incoming_status == frame_fragment::status_requested)
 		direct_request(con->remote_endpoint(), frag);
 }
 #endif
 
-void local_node::incoming_protocol_frame(connection::ptr_t con, signature_scheme_id sig, boost::uint8_t frame_type)
+void local_node::incoming_protocol_frame(connection::ptr_t con, protocol_id protocol, boost::uint8_t frame_type)
 {
-	signature_scheme::ptr_t protocol_handler = validate_protocol(sig);
+	network_protocol::ptr_t protocol_handler = validate_protocol(protocol);
 
 	if (!protocol_handler)
 	{
@@ -943,11 +943,11 @@ struct hunk_desc_cmp
 	const boost::posix_time::ptime now;
 };
 
-hunk_descriptor_t local_node::cache_local_request(signature_scheme_id pid, content_identifier id, std::size_t size)
+hunk_descriptor_t local_node::cache_local_request(protocol_id pid, content_identifier id, std::size_t size)
 {
 	stored_hunks_t::iterator hunk = stored_hunks_.begin();
 	for (; hunk != stored_hunks_.end(); ++hunk) {
-		if (hunk->sig == pid && hunk->id == id) {
+		if (hunk->protocol == pid && hunk->id == id) {
 			hunk->local_requested = true;
 			hunk->closer_peers = 0;
 			return stored_hunks_.end();
@@ -960,7 +960,7 @@ hunk_descriptor_t local_node::cache_local_request(signature_scheme_id pid, conte
 	return --stored_hunks_.end();
 }
 
-hunk_descriptor_t local_node::cache_remote_request(signature_scheme_id pid, content_identifier id, std::size_t size, boost::posix_time::time_duration request_delta)
+hunk_descriptor_t local_node::cache_remote_request(protocol_id pid, content_identifier id, std::size_t size, boost::posix_time::time_duration request_delta)
 {
 	// hunk is larger than our average oob threshold, we will never cache such a hunk
 	// for remote requests, shouldn't be needed since we should not be seeing attached data
@@ -978,7 +978,7 @@ hunk_descriptor_t local_node::cache_remote_request(signature_scheme_id pid, cont
 	return --stored_hunks_.end();
 }
 
-hunk_descriptor_t local_node::cache_store(signature_scheme_id pid, content_identifier id, std::size_t size)
+hunk_descriptor_t local_node::cache_store(protocol_id pid, content_identifier id, std::size_t size)
 {
 	int closer = closer_peers(id.publisher);
 
@@ -1017,7 +1017,7 @@ bool local_node::try_prune_cache(std::size_t size, int closer_peers, boost::posi
 			if (needed_bytes_ <= hunk->size) {
 				// That's it, we've got enough bytes, now prune the hunks to free the space
 				for (std::vector<stored_hunks_t::iterator>::iterator pruned = to_be_pruned.begin(); pruned != to_be_pruned.end(); ++pruned) {
-					get_protocol((*pruned)->sig).prune_hunk((*pruned)->id);
+					get_protocol((*pruned)->protocol).prune_hunk((*pruned)->id);
 					stored_hunks_.erase(*pruned);
 					stored_size_ -= (*pruned)->size;
 				}
@@ -1034,7 +1034,7 @@ bool local_node::try_prune_cache(std::size_t size, int closer_peers, boost::posi
 	return true;
 }
 
-hunk_descriptor_t local_node::load_existing_hunk(signature_scheme_id pid, content_identifier id, std::size_t size)
+hunk_descriptor_t local_node::load_existing_hunk(protocol_id pid, content_identifier id, std::size_t size)
 {
 	stored_hunks_.push_back(stored_hunk(pid, id, size, closer_peers(id.publisher), false));
 	stored_size_ += size;

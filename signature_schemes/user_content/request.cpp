@@ -38,13 +38,13 @@
 
 using namespace user_content;
 
-void content_request::initiate_request(signature_scheme_id sig, const content_identifier& key, local_node& node, content_size_t content_size)
+void content_request::initiate_request(protocol_id protocol, const content_identifier& key, local_node& node, content_size_t content_size)
 {
 	last_indirect_request_peer_ = node.id();
 	content_size_ = content_size;
 
 	packet::ptr_t pkt(new packet());
-	pkt->sig(sig);
+	pkt->protocol(protocol);
 	pkt->source(node.id());
 	pkt->destination(key.publisher);
 	pkt->name(key.name);
@@ -76,10 +76,10 @@ bool content_request::snoop_packet(local_node& node, packet::ptr_t pkt)
 						(*handler)(const_payload_buffer_ptr());
 					return true;
 				}
-				partial_content_ = framented_content(static_cast<network_protocol*>(&node.get_protocol(pkt))->get_payload_buffer(std::size_t(sources_->size)));
+				partial_content_ = framented_content(static_cast<content_protocol*>(&node.get_protocol(pkt))->get_payload_buffer(std::size_t(sources_->size)));
 			}
 			std::pair<std::size_t, std::size_t> range = partial_content_->next_invalid_range();
-			frame_fragment::ptr_t frag(new frame_fragment(pkt->sig(), pkt->content_id(), range.first, range.second));
+			frame_fragment::ptr_t frag(new frame_fragment(pkt->protocol(), pkt->content_id(), range.first, range.second));
 			node.direct_request(sources_->sources.begin()->second.ep, frag);
 			++sources_->sources.begin()->second.active_request_count;
 			direct_request_pending_ = true;
@@ -145,7 +145,7 @@ const_payload_buffer_ptr content_request::snoop_fragment(local_node& node, const
 			const_payload_buffer_ptr payload = partial_content_->complete();
 
 			if (payload) {
-				if (static_cast<network_protocol*>(&node.get_protocol(frag->protocol()))->content_id(payload) == frag->id())
+				if (static_cast<content_protocol*>(&node.get_protocol(frag->protocol()))->content_id(payload) == frag->id())
 					return payload;
 				else
 					partial_content_->reset();
@@ -185,7 +185,7 @@ framented_content::fragment_buffer content_request::get_fragment_buffer(std::siz
 bool content_request::timeout(local_node& node, packet::ptr_t pkt)
 {
 	if (direct_request_pending_) {
-		frame_fragment::ptr_t frag(new frame_fragment(pkt->sig()));
+		frame_fragment::ptr_t frag(new frame_fragment(pkt->protocol()));
 		snoop_fragment(node, direct_request_peer_, frag);
 		if (frag->status() != frame_fragment::status_failed)
 			return false;

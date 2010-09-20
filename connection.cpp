@@ -194,7 +194,7 @@ void connection::read_handshake(const boost::system::error_code& error, std::siz
 template <typename Adr>
 const_buffer connection::do_generate_handshake()
 {
-	const std::vector<signature_scheme_id>& protocols = node_.supported_protocols();
+	const std::vector<protocol_id>& protocols = node_.supported_protocols();
 	link_handshake<Adr>* handshake = buffer_cast<link_handshake<Adr>*>( link_.send_buffer(sizeof(link_handshake<Adr>)
 	                                                                    + (protocols.size() - 1) * 2) );
 	handshake->sig[0] = 'A';
@@ -208,8 +208,8 @@ const_buffer connection::do_generate_handshake()
 	u16(handshake->incoming_port, node_.config().listen_port());
 
 	handshake->supported_protocol_count = protocols.size();
-	for (std::vector<signature_scheme_id>::const_iterator sig = protocols.begin(); sig != protocols.end(); ++sig) {
-		u16(handshake->supported_protocols[sig - protocols.begin()], *sig);
+	for (std::vector<protocol_id>::const_iterator protocol = protocols.begin(); protocol != protocols.end(); ++protocol) {
+		u16(handshake->supported_protocols[protocol - protocols.begin()], *protocol);
 	}
 
 	return link_.sendable_buffer();
@@ -299,8 +299,8 @@ void connection::complete_connection(const boost::system::error_code& error, std
 	link_.received(bytes_transferred);
 
 	const boost::uint8_t (*supported_protocols)[2] = buffer_cast<const boost::uint8_t(*)[2]>(link_.received_buffer());
-	for (std::vector<signature_scheme_id>::iterator sig = supported_protocols_.begin(); sig != supported_protocols_.end(); ++sig) {
-		*sig = u16(supported_protocols[sig - supported_protocols_.begin()]);
+	for (std::vector<protocol_id>::iterator protocol = supported_protocols_.begin(); protocol != supported_protocols_.end(); ++protocol) {
+		*protocol = u16(supported_protocols[protocol - supported_protocols_.begin()]);
 	}
 	link_.consume_receive_buffer(supported_protocols_.size() * 2);
 
@@ -449,7 +449,7 @@ void connection::frame_head_received(const boost::system::error_code& error, std
 			// this is a protocol specific frame
 			// get the protocol and hand it off to the node
 			if (link_.valid_received_bytes() >= 4) {
-				signature_scheme_id protocol = buffer_cast<const boost::uint16_t*>(link_.received_buffer())[1];
+				protocol_id protocol = buffer_cast<const boost::uint16_t*>(link_.received_buffer())[1];
 				node_.incoming_protocol_frame(shared_from_this(), protocol, frame_type);
 				return;
 			}

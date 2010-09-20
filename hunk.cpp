@@ -82,7 +82,7 @@ std::string mapped_content::temp_path(const std::string& path, std::size_t size)
 	return p.string();
 }
 
-void content_store::load_contents(boost::filesystem::path dir_path, signature_scheme_id pid, local_node& node)
+void content_store::load_contents(boost::filesystem::path dir_path, protocol_id pid, local_node& node)
 {
 	if (!boost::filesystem::exists(dir_path)) return;
 

@@ -51,7 +51,7 @@ struct packed_header
 {
 	boost::uint8_t frame_type;
 	boost::uint8_t status_name_components;
-	boost::uint8_t sig_scheme[2];
+	boost::uint8_t protocol[2];
 	boost::uint8_t destination[network_key::packed_size];
 	boost::uint8_t payload_size[8];
 };
@@ -66,7 +66,7 @@ std::pair<content_size_t, unsigned> packet::parse_header(const_buffer buf)
 	const packed_header* header = buffer_cast<const packed_header*>(buf);
 
 	content_status(content_status_t((header->status_name_components & 0xC0) >> 6));
-	sig(u16(header->sig_scheme));
+	protocol(u16(header->protocol));
 	destination(network_key(header->destination));
 
 	if (content_status() == content_attached)
@@ -84,7 +84,7 @@ std::size_t packet::serialize_header(mutable_buffer buf)
 	packed_header* header = buffer_cast<packed_header*>(buf);
 	
 	header->frame_type = connection::frame_network_packet;
-	u16(header->sig_scheme, sig());
+	u16(header->protocol, protocol());
 	header->status_name_components = (content_status() << 6) | name().component_count();
 	destination().encode(header->destination);
 

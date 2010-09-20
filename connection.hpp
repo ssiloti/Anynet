@@ -60,7 +60,7 @@ public:
 	{
 		boost::uint8_t frame_type;
 		boost::uint8_t rsvd;
-		boost::uint8_t sig_scheme[2];
+		boost::uint8_t protocol[2];
 	};
 
 	virtual bool done() = 0;
@@ -114,7 +114,7 @@ public:
 	bool is_connected() const { return lifecycle_ == connected; }
 	boost::posix_time::time_duration age() { return boost::posix_time::second_clock::universal_time() - established_; }
 	bool is_transfer_outstanding() const { return receive_outstanding_ || outstanding_non_packet_frames_ || !packet_queue_.empty() || !frame_queue_.empty(); }
-	bool supports_protocol(signature_scheme_id p) { return std::find(supported_protocols_.begin(), supported_protocols_.end(), p) != supported_protocols_.end(); }
+	bool supports_protocol(protocol_id p) { return std::find(supported_protocols_.begin(), supported_protocols_.end(), p) != supported_protocols_.end(); }
 
 	void send_reverse_successor()
 	{
@@ -351,7 +351,7 @@ private:
 	lifecycle lifecycle_;
 	network_key remote_identity_;
 	ip::address reported_peer_address_;
-	std::vector<signature_scheme_id> supported_protocols_;
+	std::vector<protocol_id> supported_protocols_;
 
 	std::deque<queued_packet> packet_queue_;
 	std::deque<queued_protocol_frame> frame_queue_;

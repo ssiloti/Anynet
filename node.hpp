@@ -38,7 +38,7 @@
 
 #include "known_peers.hpp"
 #include "connection.hpp"
-#include "signature_scheme.hpp"
+#include <protocol.hpp>
 #include "hunk.hpp"
 #include "authority.hpp"
 #include "config.hpp"
@@ -120,7 +120,7 @@ public:
 	boost::posix_time::time_duration base_hunk_lifetime();
 	boost::posix_time::time_duration age() const { return boost::posix_time::second_clock::universal_time() - created_; }
 	std::size_t average_oob_threshold() const { return avg_oob_threshold_; }
-	std::vector<signature_scheme_id> supported_protocols() const;
+	std::vector<protocol_id> supported_protocols() const;
 
 	// connections
 	void make_connection(ip::tcp::endpoint peer);
@@ -129,15 +129,15 @@ public:
 
 	// protocols
 	template <typename P>
-	P& sig()
+	P& protocol()
 	{
 		return *boost::static_pointer_cast<P>( protocol_handlers_.find(P::protocol_id)->second );
 	}
-	signature_scheme& get_protocol(packet::ptr_t pkt) { return get_protocol(pkt->sig()); }
-//	signature_scheme& get_protocol(frame_fragment::ptr_t frag) { return get_protocol(frag->sig()); }
-	signature_scheme& get_protocol(signature_scheme_id pid) { return *protocol_handlers_.find(pid)->second; }
+	network_protocol& get_protocol(packet::ptr_t pkt) { return get_protocol(pkt->protocol()); }
+//	network_protocol& get_protocol(frame_fragment::ptr_t frag) { return get_protocol(frag->protocol()); }
+	network_protocol& get_protocol(protocol_id pid) { return *protocol_handlers_.find(pid)->second; }
 
-	bool register_protocol_handler(signature_scheme_id id, signature_scheme::ptr_t proto)
+	bool register_protocol_handler(protocol_id id, network_protocol::ptr_t proto)
 	{
 		supported_protocols_.push_back(id);
 		return protocol_handlers_.insert(std::make_pair(id, proto)).second;
@@ -166,17 +166,17 @@ public:
 //	void incoming_fragment(connection::ptr_t con, frame_fragment::ptr_t frag, std::size_t payload_size);
 //	void fragment_received(connection::ptr_t con, frame_fragment::ptr_t frag);
 
-	void incoming_protocol_frame(connection::ptr_t con, signature_scheme_id sig, boost::uint8_t frame_type);
+	void incoming_protocol_frame(connection::ptr_t con, protocol_id protocol, boost::uint8_t frame_type);
 
 	// failures
 	void send_failure(connection::ptr_t con);
 	void receive_failure(connection::ptr_t con) { disconnect_peer(con); }
 
 	// cache policy
-	hunk_descriptor_t cache_local_request(signature_scheme_id pid, content_identifier id, std::size_t size);
-	hunk_descriptor_t cache_store(signature_scheme_id pid, content_identifier id, std::size_t size);
-	hunk_descriptor_t cache_remote_request(signature_scheme_id pid, content_identifier id, std::size_t size, boost::posix_time::time_duration request_delta);
-	hunk_descriptor_t load_existing_hunk(signature_scheme_id pid, content_identifier id, std::size_t size);
+	hunk_descriptor_t cache_local_request(protocol_id pid, content_identifier id, std::size_t size);
+	hunk_descriptor_t cache_store(protocol_id pid, content_identifier id, std::size_t size);
+	hunk_descriptor_t cache_remote_request(protocol_id pid, content_identifier id, std::size_t size, boost::posix_time::time_duration request_delta);
+	hunk_descriptor_t load_existing_hunk(protocol_id pid, content_identifier id, std::size_t size);
 	hunk_descriptor_t not_a_hunk() { return stored_hunks_.end(); }
 
 	// credit accounting
@@ -197,7 +197,7 @@ private:
 	void add_peer(connection::ptr_t peer);
 	void remove_peer(connection::ptr_t peer);
 
-	signature_scheme::ptr_t validate_protocol(signature_scheme_id sig);
+	network_protocol::ptr_t validate_protocol(protocol_id protocol);
 
 	bool try_prune_cache(std::size_t size, int closer_peers, boost::posix_time::time_duration age);
 
@@ -239,10 +239,10 @@ private:
 	std::vector<connection::ptr_t> connecting_peers_;
 	std::vector<connection::ptr_t> disconnecting_peers_;
 
-	typedef std::map<signature_scheme_id, signature_scheme::ptr_t> protocol_handlers_t;
+	typedef std::map<protocol_id, network_protocol::ptr_t> protocol_handlers_t;
 
 	protocol_handlers_t protocol_handlers_;
-	std::vector<signature_scheme_id> supported_protocols_;
+	std::vector<protocol_id> supported_protocols_;
 
 	std::size_t min_oob_threshold_, max_oob_threshold_, avg_oob_threshold_;
 

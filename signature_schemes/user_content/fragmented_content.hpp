@@ -59,7 +59,7 @@ public:
 
 	std::pair<std::size_t, std::size_t> next_invalid_range() { if (invalid_.empty()) return std::make_pair(0, 0); return std::make_pair(invalid_.front().offset, invalid_.front().size); }
 	fragment_buffer get_fragment_buffer(std::size_t offset, std::size_t size);
-	void mark_valid(frame_fragment_ptr_t frag, ip::address source);
+	void mark_valid(boost::shared_ptr<frame_fragment> frag, ip::address source);
 	const_payload_buffer_ptr complete();
 	void reset();
 

@@ -35,7 +35,7 @@
 #define FRAGMENT_HPP
 
 #include "fragmented_content.hpp"
-#include "user_content.hpp"
+#include "content_protocol.hpp"
 #include "link.hpp"
 #include "content.hpp"
 #include "hunk.hpp"
@@ -59,7 +59,7 @@ public:
 		status_failed = 3,
 	};
 
-	frame_fragment(signature_scheme_id proto,
+	frame_fragment(protocol_id proto,
 	               content_identifier i,
 	               std::size_t o,
 	               std::size_t s,
@@ -67,12 +67,12 @@ public:
 		: protocol_(proto), id_(i), offset_(o), size_(s), payload_(payload), status_(payload ? status_attached : status_requested)
 	{}
 
-	frame_fragment(signature_scheme_id proto, content_identifier i = content_identifier())
+	frame_fragment(protocol_id proto, content_identifier i = content_identifier())
 		: protocol_(proto), id_(i), status_(status_failed) {}
 
 	//frame_fragment() : status_(status_failed) {}
 
-	signature_scheme_id protocol() const { return protocol_; }
+	protocol_id protocol() const { return protocol_; }
 	const content_identifier& id() const { return id_; }
 	std::size_t offset() const { return offset_; }
 	std::size_t size() const { return size_; }
@@ -95,7 +95,7 @@ public:
 	virtual void send_failure(local_node& node, const network_key& dest);
 
 	template <typename Handler>
-	void receive_payload(net_link& link, boost::shared_ptr<network_protocol> protocol, Handler handler)
+	void receive_payload(net_link& link, boost::shared_ptr<content_protocol> protocol, Handler handler)
 	{
 		if (link.valid_received_bytes() >= header_size())
 			header_received(link, protocol, handler, boost::system::error_code(), 0);
@@ -137,7 +137,7 @@ private:
 
 	template <typename Handler>
 	void header_received(net_link& link,
-	                     boost::shared_ptr<network_protocol> protocol,
+	                     boost::shared_ptr<content_protocol> protocol,
 	                     Handler handler,
 	                     const boost::system::error_code& error,
 	                     std::size_t bytes_transferred)
@@ -164,7 +164,7 @@ private:
 
 	template <typename Handler>
 	void name_received(net_link& link,
-	                   boost::shared_ptr<network_protocol> protocol,
+	                   boost::shared_ptr<content_protocol> protocol,
 	                   Handler handler,
 	                   const boost::system::error_code& error)
 	{
@@ -251,7 +251,7 @@ private:
 	content_identifier id_;
 	const_payload_buffer_ptr payload_;
 	std::vector<boost::shared_ptr<heap_buffer> > padding_;
-	signature_scheme_id protocol_;
+	protocol_id protocol_;
 	fragment_status status_;
 };
 

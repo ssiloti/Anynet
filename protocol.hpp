@@ -152,7 +152,7 @@ private:
 	};
 };
 
-class signature_scheme : public boost::enable_shared_from_this<signature_scheme>
+class network_protocol : public boost::enable_shared_from_this<network_protocol>
 {
 public:
 	struct crumb
@@ -173,12 +173,12 @@ protected:
 	const static boost::posix_time::time_duration min_successor_source_age;
 
 public:
-	typedef boost::shared_ptr<signature_scheme> ptr_t;
+	typedef boost::shared_ptr<network_protocol> ptr_t;
 
-	signature_scheme(local_node& node, signature_scheme_id p);
-	virtual ~signature_scheme() {}
+	network_protocol(local_node& node, protocol_id p);
+	virtual ~network_protocol() {}
 
-	signature_scheme_id id() const { return protocol_; }
+	protocol_id id() const { return protocol_; }
 
 	virtual void initiate_request(const content_identifier& cid, content_size_t size = 0) {}
 
@@ -237,7 +237,7 @@ protected:
 	content_sources_t content_sources_;
 	boost::asio::deadline_timer vacume_sources_;
 	crumbs_t crumbs_;
-	signature_scheme_id protocol_;
+	protocol_id protocol_;
 	bool shutting_down_;
 
 private:
@@ -276,11 +276,11 @@ public:
 	}
 
 
-	static std::size_t parse(packet::ptr_t pkt, const_buffer buf, signature_scheme& sig)
+	static std::size_t parse(packet::ptr_t pkt, const_buffer buf, network_protocol& protocol)
 	{
 		const packed_detached_sources* s = buffer_cast<const packed_detached_sources*>(buf);
 		pkt->source(network_key(s->key));
-		content_sources::ptr_t sources(sig.get_content_sources(pkt->content_id(), u64(s->size)));
+		content_sources::ptr_t sources(protocol.get_content_sources(pkt->content_id(), u64(s->size)));
 		pkt->payload(boost::make_shared<payload_content_sources<address_type> >(sources));
 		int sources_count = u16(s->count);
 

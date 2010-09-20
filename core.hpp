@@ -47,7 +47,7 @@
 #include <vector>
 #include <set>
 
-typedef boost::uint16_t signature_scheme_id;
+typedef boost::uint16_t protocol_id;
 typedef boost::uint64_t content_size_t;
 
 enum defined_signature_schemes

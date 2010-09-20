@@ -104,8 +104,8 @@ public:
 			                                       placeholders::bytes_transferred));
 	}
 
-	signature_scheme_id sig() const { return sig_scheme_; }
-	void sig(signature_scheme_id p) { sig_scheme_ = p; }
+	protocol_id protocol() const { return sig_scheme_; }
+	void protocol(protocol_id p) { sig_scheme_ = p; }
 
 	content_status_t content_status() const { return content_status_; }
 	void content_status(content_status_t s) { content_status_ = s; }
@@ -207,7 +207,7 @@ private:
 	}
 
 	bool direct_;
-	signature_scheme_id sig_scheme_;
+	protocol_id sig_scheme_;
 	content_status_t content_status_;
 	network_key source_;
 	network_key destination_;

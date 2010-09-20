@@ -69,7 +69,7 @@ const_buffer non_authoritative::insert_buffer::get() const
 }
 
 non_authoritative::non_authoritative(local_node& node)
-	: user_content::network_protocol(node, protocol_id), stored_hunks_(node.config().content_store_path() + "/non_authoritative", protocol_id, node)
+	: user_content::content_protocol(node, protocol_id), stored_hunks_(node.config().content_store_path() + "/non_authoritative", protocol_id, node)
 {
 }
 

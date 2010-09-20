@@ -41,7 +41,7 @@ struct packed_fragment_header
 {
 	boost::uint8_t frame_type;
 	boost::uint8_t rsvd0;
-	boost::uint8_t sig_scheme[2];
+	boost::uint8_t protocol[2];
 	boost::uint8_t status_name_components;
 	boost::uint8_t rsvd1[3];
 	boost::uint8_t key[network_key::packed_size];
@@ -58,8 +58,8 @@ std::size_t frame_fragment::serialize_header(mutable_buffer buf)
 {
 	packed_fragment_header* h = buffer_cast<packed_fragment_header*>(buf);
 
-	h->frame_type = network_protocol::frame_type_fragment;
-	u16(h->sig_scheme, protocol_);
+	h->frame_type = content_protocol::frame_type_fragment;
+	u16(h->protocol, protocol_);
 	h->status_name_components = id_.name.component_count() | (status() << 6);
 	id_.publisher.encode(h->key);
 	u64(h->offset, offset_);
@@ -80,7 +80,7 @@ unsigned frame_fragment::parse_header(const_buffer buf)
 {
 	const packed_fragment_header* h = buffer_cast<const packed_fragment_header*>(buf);
 
-	protocol_ = u16(h->sig_scheme);
+	protocol_ = u16(h->protocol);
 	status_ = fragment_status(h->status_name_components >> 6);
 	if (status_ == 2)
 		status_ = status_failed;
@@ -120,7 +120,7 @@ std::vector<const_buffer> frame_fragment::serialize(std::size_t threshold, mutab
 void frame_fragment::send_failure(local_node& node, const network_key& dest)
 {
 	to_reply();
-	static_cast<network_protocol*>(&node.get_protocol(protocol_))->snoop_fragment(dest, shared_from_this());
+	static_cast<content_protocol*>(&node.get_protocol(protocol_))->snoop_fragment(dest, shared_from_this());
 }
 
 void frame_fragment::to_request(std::size_t o, std::size_t s)

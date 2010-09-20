@@ -39,11 +39,8 @@
 namespace user_content
 {
 
-class user_content;
+class content_protocol;
 class frame_fragment;
-
-typedef boost::shared_ptr<user_content> user_content_ptr_t;
-typedef boost::shared_ptr<frame_fragment> frame_fragment_ptr_t;
 
 }
 

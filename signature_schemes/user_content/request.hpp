@@ -35,7 +35,7 @@
 #define USER_CONTENT_REQUEST_HPP
 
 #include "fragmented_content.hpp"
-#include "signature_scheme.hpp"
+#include <protocol.hpp>
 #include "packet.hpp"
 #include "core.hpp"
 
@@ -53,11 +53,11 @@ public:
 	content_request() : receiving_content_(false), direct_request_pending_(false) {}
 
 	bool snoop_packet(local_node& node, packet::ptr_t pkt);
-	const_payload_buffer_ptr snoop_fragment(local_node& node, const network_key& src, frame_fragment_ptr_t frag);
+	const_payload_buffer_ptr snoop_fragment(local_node& node, const network_key& src, boost::shared_ptr<frame_fragment> frag);
 	void add_handler(const keyed_handler_t& handler) { handlers_.push_back(handler); }
 	bool timeout(local_node& node, packet::ptr_t pkt);
 
-	void initiate_request(signature_scheme_id sig, const content_identifier& key, local_node& node, content_size_t content_size);
+	void initiate_request(protocol_id protocol, const content_identifier& key, local_node& node, content_size_t content_size);
 
 	framented_content::fragment_buffer get_fragment_buffer(std::size_t offset, std::size_t size);
 

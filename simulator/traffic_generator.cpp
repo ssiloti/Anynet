@@ -56,7 +56,7 @@ void traffic_generator::tick(int time)
 	//	return;
 	//}
 	if (time == next_non_authoritative_insert_) {
-		non_authoritative& non_auth = node_.sig<non_authoritative>();
+		non_authoritative& non_auth = node_.protocol<non_authoritative>();
 		std::stringstream content;
 		content << config_.listen_port() << time;
 		non_authoritative::insert_buffer payload = non_auth.get_insertion_buffer(content.str().size());
@@ -71,7 +71,7 @@ void traffic_generator::tick(int time)
 		if (hunk_id != key_max) {
 			sim.begin_query();
 			DLOG(INFO) << "Node id=" << std::string(node_.id()) << " Requesting non-authoritative hunk id=" << std::string(hunk_id);
-			non_authoritative& non_auth = node_.sig<non_authoritative>();
+			non_authoritative& non_auth = node_.protocol<non_authoritative>();
 			non_auth.retrieve_hunk(hunk_id, boost::protect(boost::bind(&traffic_generator::hunk_received, this, _1)));
 		}
 		next_non_authoritative_get_ = sim.get_non_authoritative_interval();

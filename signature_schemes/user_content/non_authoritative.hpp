@@ -37,7 +37,7 @@
 #include <glog/logging.h>
 
 #include "hunk.hpp"
-#include "user_content.hpp"
+#include "content_protocol.hpp"
 #include "key.hpp"
 #include "node.hpp"
 #include <boost/smart_ptr.hpp>
@@ -47,10 +47,10 @@
 #include "simulator.hpp"
 #endif
 
-class non_authoritative : public user_content::network_protocol
+class non_authoritative : public user_content::content_protocol
 {
 public:
-	static const signature_scheme_id protocol_id = signature_sha256;
+	static const protocol_id protocol_id = signature_sha256;
 
 	struct insert_buffer : public mutable_shared_buffer
 	{

@@ -31,8 +31,8 @@
 //
 // Contact:  Steven Siloti <ssiloti@gmail.com>
 
-#ifndef PROTOCOL_USER_CONTENT_HPP
-#define PROTOCOL_USER_CONTENT_HPP
+#ifndef USER_CONTENT_PROTOCOL_HPP
+#define USER_CONTENT_PROTOCOL_HPP
 
 #include <glog/logging.h>
 
@@ -40,7 +40,7 @@
 #include "fragmented_content.hpp"
 #include "request.hpp"
 #include "hunk.hpp"
-#include "signature_scheme.hpp"
+#include <protocol.hpp>
 #include "packet.hpp"
 #include "core.hpp"
 #include <boost/function.hpp>
@@ -52,7 +52,7 @@ class local_node;
 namespace user_content
 {
 
-class network_protocol : public signature_scheme
+class content_protocol : public network_protocol
 {
 	typedef std::map<content_identifier, boost::shared_ptr<crumb> > crumbs_t;
 
@@ -65,11 +65,11 @@ public:
 	virtual void prune_hunk(const content_identifier& id) {}
 
 	virtual void receive_attached_content(connection::ptr_t con, packet::ptr_t pkt, std::size_t payload_size);
-//	virtual void incoming_fragment(connection::ptr_t con, frame_fragment_ptr_t frag, std::size_t payload_size);
+//	virtual void incoming_fragment(connection::ptr_t con, boost::shared_ptr<frame_fragment> frag, std::size_t payload_size);
 	virtual void incoming_frame(connection::ptr_t con, boost::uint8_t frame_type);
 
 	virtual payload_buffer_ptr get_payload_buffer(std::size_t size) { return payload_buffer_ptr(); }
-	virtual framented_content::fragment_buffer get_fragment_buffer(frame_fragment_ptr_t frag);
+	virtual framented_content::fragment_buffer get_fragment_buffer(boost::shared_ptr<frame_fragment> frag);
 
 	void new_content_request(const content_identifier& key,
 	                         content_size_t content_size = 0,
@@ -80,12 +80,12 @@ public:
 	virtual void to_content_location_failure(packet::ptr_t pkt);
 	virtual void request_from_location_failure(packet::ptr_t pkt);
 
-	virtual void snoop_fragment(const network_key& src, frame_fragment_ptr_t frag);
+	virtual void snoop_fragment(const network_key& src, boost::shared_ptr<frame_fragment> frag);
 
-	virtual void shutdown() { signature_scheme::shutdown(); vacume_sources_.cancel(); response_handlers_.clear(); }
+	virtual void shutdown() { network_protocol::shutdown(); vacume_sources_.cancel(); response_handlers_.clear(); }
 
 protected:
-	network_protocol(local_node& node, signature_scheme_id p);
+	content_protocol(local_node& node, protocol_id p);
 
 	virtual void snoop_packet_payload(packet::ptr_t pkt);
 

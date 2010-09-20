@@ -36,7 +36,7 @@
 
 #include "known_peers.hpp"
 #include "authority.hpp"
-#include "signature_scheme.hpp"
+#include <protocol.hpp>
 #include <db_cxx.h>
 #include <boost/date_time/posix_time/posix_time_types.hpp>
 #include <map>
@@ -162,10 +162,10 @@ private:
 	credits_index_t credit_index_;
 };
 
-class indirect_credit : public signature_scheme
+class indirect_credit : public network_protocol
 {
 public:
-	static const signature_scheme_id protocol_id = signature_sha1_rsa_credits;
+	static const protocol_id protocol_id = signature_sha1_rsa_credits;
 
 	static void create(local_node& node)
 	{

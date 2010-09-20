@@ -33,7 +33,7 @@
 
 #include "fragment.hpp"
 #include "payload_content_buffer.hpp"
-#include "user_content.hpp"
+#include "content_protocol.hpp"
 #include "node.hpp"
 #include <boost/bind/protect.hpp>
 #include <boost/bind.hpp>
@@ -42,21 +42,21 @@
 
 using namespace user_content;
 
-network_protocol::network_protocol(local_node& node, signature_scheme_id p)
-	: signature_scheme(node, p)
+content_protocol::content_protocol(local_node& node, protocol_id p)
+	: network_protocol(node, p)
 {}
 
-void network_protocol::to_content_location_failure(packet::ptr_t pkt)
+void content_protocol::to_content_location_failure(packet::ptr_t pkt)
 {
 	pkt->to_reply(packet::content_failure, boost::make_shared<payload_failure>(pkt->payload_as<payload_request>()->size));
 }
 
-void network_protocol::request_from_location_failure(packet::ptr_t pkt)
+void content_protocol::request_from_location_failure(packet::ptr_t pkt)
 {
 	pkt->to_reply(packet::content_requested, boost::make_shared<payload_request>(pkt->payload_as<payload_failure>()->size));
 }
 
-void network_protocol::snoop_packet_payload(packet::ptr_t pkt)
+void content_protocol::snoop_packet_payload(packet::ptr_t pkt)
 {
 	switch (pkt->content_status())
 	{
@@ -133,8 +133,8 @@ void network_protocol::snoop_packet_payload(packet::ptr_t pkt)
 			else {
 				// any time there's some activity on the request we reset the timeout
 				keyed_handler->second->timeout.expires_from_now(boost::posix_time::seconds(5));
-				keyed_handler->second->timeout.async_wait(boost::bind(&network_protocol::remove_response_handler,
-				                                                      shared_from_this_as<network_protocol>(),
+				keyed_handler->second->timeout.async_wait(boost::bind(&content_protocol::remove_response_handler,
+				                                                      shared_from_this_as<content_protocol>(),
 				                                                      keyed_handler->first,
 				                                                      placeholders::error));
 			}
@@ -142,7 +142,7 @@ void network_protocol::snoop_packet_payload(packet::ptr_t pkt)
 	}
 }
 
-void network_protocol::snoop_fragment(const network_key& src, frame_fragment::ptr_t frag)
+void content_protocol::snoop_fragment(const network_key& src, frame_fragment::ptr_t frag)
 {
 	if (!frag->is_request()) {
 		response_handlers_t::iterator request = response_handlers_.find(frag->id());
@@ -152,7 +152,7 @@ void network_protocol::snoop_fragment(const network_key& src, frame_fragment::pt
 
 			if (payload) {
 				packet::ptr_t pkt(new packet());
-				pkt->sig(id());
+				pkt->protocol(id());
 				pkt->content_status(packet::content_attached);
 				pkt->mark_direct();
 				pkt->destination(node_.id());
@@ -163,7 +163,7 @@ void network_protocol::snoop_fragment(const network_key& src, frame_fragment::pt
 			}
 			else if (frag->status() == frame_fragment::status_failed) {
 				packet::ptr_t pkt(new packet());
-				pkt->sig(id());
+				pkt->protocol(id());
 				pkt->content_status(packet::content_failure);
 				pkt->source(frag->id().publisher);
 				pkt->name(frag->id().name);
@@ -178,8 +178,8 @@ void network_protocol::snoop_fragment(const network_key& src, frame_fragment::pt
 
 			// any time there's some activity on the request we reset the timeout
 			request->second->timeout.expires_from_now(boost::posix_time::seconds(5));
-			request->second->timeout.async_wait(boost::bind(&network_protocol::remove_response_handler,
-			                                                shared_from_this_as<network_protocol>(),
+			request->second->timeout.async_wait(boost::bind(&content_protocol::remove_response_handler,
+			                                                shared_from_this_as<content_protocol>(),
 			                                                request->first,
 			                                                placeholders::error));
 		}
@@ -194,19 +194,19 @@ void network_protocol::snoop_fragment(const network_key& src, frame_fragment::pt
 	}
 }
 
-void network_protocol::receive_attached_content(connection::ptr_t con, packet::ptr_t pkt, std::size_t payload_size)
+void content_protocol::receive_attached_content(connection::ptr_t con, packet::ptr_t pkt, std::size_t payload_size)
 {
 	payload_buffer_ptr payload_buffer(get_payload_buffer(payload_size));
 	pkt->payload(boost::make_shared<payload_content_buffer>(boost::ref(node_), payload_buffer));
-	con->receive_payload(std::vector<mutable_buffer>(1, payload_buffer->get()), boost::protect(boost::bind(&network_protocol::content_received, this, con, pkt)));
+	con->receive_payload(std::vector<mutable_buffer>(1, payload_buffer->get()), boost::protect(boost::bind(&content_protocol::content_received, this, con, pkt)));
 }
 
-void network_protocol::content_received(connection::ptr_t con, packet::ptr_t pkt)
+void content_protocol::content_received(connection::ptr_t con, packet::ptr_t pkt)
 {
 	node_.packet_received(con, pkt);
 }
 
-void network_protocol::incoming_frame(connection::ptr_t con, boost::uint8_t frame_type)
+void content_protocol::incoming_frame(connection::ptr_t con, boost::uint8_t frame_type)
 {
 	switch (frame_type)
 	{
@@ -214,9 +214,9 @@ void network_protocol::incoming_frame(connection::ptr_t con, boost::uint8_t fram
 		{
 			frame_fragment::ptr_t frag(boost::make_shared<frame_fragment>(id()));
 			con->receive_payload(frag,
-			                     shared_from_this_as<network_protocol>(),
-			                     boost::protect(boost::bind(&network_protocol::fragment_received,
-			                                                shared_from_this_as<network_protocol>(),
+			                     shared_from_this_as<content_protocol>(),
+			                     boost::protect(boost::bind(&content_protocol::fragment_received,
+			                                                shared_from_this_as<content_protocol>(),
 			                                                con,
 			                                                frag)));
 			break;
@@ -225,7 +225,7 @@ void network_protocol::incoming_frame(connection::ptr_t con, boost::uint8_t fram
 	}
 }
 
-void network_protocol::fragment_received(connection::ptr_t con, boost::shared_ptr<frame_fragment> frag)
+void content_protocol::fragment_received(connection::ptr_t con, boost::shared_ptr<frame_fragment> frag)
 {
 	con->send_ack();
 	// FIXME: This is ugly, there must be a better way to send the reply
@@ -235,7 +235,7 @@ void network_protocol::fragment_received(connection::ptr_t con, boost::shared_pt
 		node_.direct_request(con->remote_endpoint(), frag);
 }
 
-framented_content::fragment_buffer network_protocol::get_fragment_buffer(frame_fragment::ptr_t frag)
+framented_content::fragment_buffer content_protocol::get_fragment_buffer(frame_fragment::ptr_t frag)
 {
 	response_handlers_t::iterator request = response_handlers_.find(frag->id());
 
@@ -245,14 +245,14 @@ framented_content::fragment_buffer network_protocol::get_fragment_buffer(frame_f
 		return framented_content::fragment_buffer(frag->offset());
 }
 
-void network_protocol::new_content_request(const content_identifier& key, content_size_t content_size, const content_request::keyed_handler_t& handler)
+void content_protocol::new_content_request(const content_identifier& key, content_size_t content_size, const content_request::keyed_handler_t& handler)
 {
 	std::pair<response_handlers_t::iterator, bool> rh = response_handlers_.insert(std::make_pair(key, boost::shared_ptr<response_handler>()));
 
 	if (rh.second) {
 		rh.first->second.reset(new response_handler(node_.io_service()));
-		rh.first->second->timeout.async_wait(boost::bind(&network_protocol::remove_response_handler,
-		                                                 shared_from_this_as<network_protocol>(),
+		rh.first->second->timeout.async_wait(boost::bind(&content_protocol::remove_response_handler,
+		                                                 shared_from_this_as<content_protocol>(),
 		                                                 rh.first->first,
 		                                                 placeholders::error));
 	}
@@ -264,7 +264,7 @@ void network_protocol::new_content_request(const content_identifier& key, conten
 		rh.first->second->request.initiate_request(id(), key, node_, content_size);
 }
 
-void network_protocol::new_content_store(content_identifier cid, const_payload_buffer_ptr hunk)
+void content_protocol::new_content_store(content_identifier cid, const_payload_buffer_ptr hunk)
 {
 	DLOG(INFO) << "New store request for cid " << std::string(cid.publisher);
 	packet::ptr_t pkt(new packet());
@@ -272,12 +272,12 @@ void network_protocol::new_content_store(content_identifier cid, const_payload_b
 	pkt->source(cid.publisher);
 	pkt->name(cid.name);
 	pkt->content_status(packet::content_attached);
-	pkt->sig(id());
+	pkt->protocol(id());
 	pkt->payload(boost::make_shared<payload_content_buffer>(boost::ref(node_), hunk));
 	node_.local_request(pkt);
 }
 
-void network_protocol::remove_response_handler(content_identifier key, const boost::system::error_code& error)
+void content_protocol::remove_response_handler(content_identifier key, const boost::system::error_code& error)
 {
 	if (!error) {
 		DLOG(INFO) << std::string(node_.id()) << ": Removing response handler " << std::string(key.publisher);
@@ -285,7 +285,7 @@ void network_protocol::remove_response_handler(content_identifier key, const boo
 		if (iter != response_handlers_.end()) {
 			google::FlushLogFiles(google::INFO);
 			packet::ptr_t pkt(new packet());
-			pkt->sig(id());
+			pkt->protocol(id());
 			pkt->content_status(packet::content_failure);
 			pkt->source(key.publisher);
 			pkt->name(key.name);
@@ -297,8 +297,8 @@ void network_protocol::remove_response_handler(content_identifier key, const boo
 			else {
 				// we had a timeout but the request still has sources to try, reset the timer
 				iter->second->timeout.expires_from_now(boost::posix_time::seconds(5));
-				iter->second->timeout.async_wait(boost::bind(&network_protocol::remove_response_handler,
-				                                             shared_from_this_as<network_protocol>(),
+				iter->second->timeout.async_wait(boost::bind(&content_protocol::remove_response_handler,
+				                                             shared_from_this_as<content_protocol>(),
 				                                             iter->first,
 				                                             placeholders::error));
 			}

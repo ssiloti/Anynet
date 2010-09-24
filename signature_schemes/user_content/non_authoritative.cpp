@@ -81,6 +81,11 @@ non_authoritative::insert_buffer non_authoritative::get_insertion_buffer(std::si
 content_identifier non_authoritative::insert_hunk(insert_buffer hunk)
 {
 	content_identifier cid(content_id(hunk.backing));
+	// Since the user is requesting an insertion while providing just a buffer, we need to make sure the
+	// content gets inserted into the local store so we can serve it up to requesters
+	hunk_descriptor_t hunk_desc = node_.cache_local_request(id(), cid, buffer_size(hunk.backing->get()));
+	if (hunk_desc != node_.not_a_hunk())
+		store_content(hunk_desc, hunk.backing);
 	new_content_store(cid, hunk.backing);
 	return cid;
 }

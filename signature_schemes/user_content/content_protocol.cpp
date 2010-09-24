@@ -94,7 +94,10 @@ void content_protocol::snoop_packet_payload(packet::ptr_t pkt)
 				content_requests_t::iterator recent_request = recent_requests_.find(pkt->content_id());
 				if (recent_request == recent_requests_.end() || recent_request->second[1].is_not_a_date_time())
 					break;
-				hunk_desc = node_.cache_remote_request(id(), pkt->source(), buffer_size(pkt->payload_as<payload_content_buffer>()->payload->get()), recent_request->second[0] - recent_request->second[1]);
+				hunk_desc = node_.cache_remote_request(id(),
+				                                       pkt->source(),
+				                                       buffer_size(pkt->payload_as<payload_content_buffer>()->payload->get()),
+				                                       recent_request->second[0] - recent_request->second[1]);
 			}
 
 			if (hunk_desc != node_.not_a_hunk())
@@ -119,6 +122,30 @@ void content_protocol::snoop_packet_payload(packet::ptr_t pkt)
 		content_sources_t::iterator sources = content_sources_.find(pkt->content_id());
 		if (sources != content_sources_.end())
 			content_sources_.erase(sources);
+	}
+	else if (pkt->content_status() == packet::content_detached) {
+		content_requests_t::iterator recent_request = recent_requests_.find(pkt->content_id());
+		content_size_t content_size = pkt->payload_as<boost::shared_ptr<content_sources> >()->get()->size;
+		if (!(recent_request == recent_requests_.end() || recent_request->second[1].is_not_a_date_time())
+		    && content_size <= node_.average_oob_threshold()) {
+			hunk_descriptor_t hunk_desc;
+			hunk_desc = node_.cache_remote_request(id(),
+			                                       pkt->source(),
+			                                       std::size_t(content_size),
+			                                       recent_request->second[0] - recent_request->second[1]);
+			if (hunk_desc != node_.not_a_hunk()) {
+				// We have detached sources, the associated content has been requested at least twice,
+				// the content is small enough for us to send in-band, and we have enough cache space
+				// to store it. Lets go ahead an start a request for the content so we can attach it
+				// to future responses.
+				new_content_request(pkt->content_id(),
+				                    std::size_t(content_size),
+				                    boost::bind(&content_protocol::store_content,
+				                                shared_from_this_as<content_protocol>(),
+				                                hunk_desc,
+				                                _1));
+			}
+		}
 	}
 
 	if (pkt->content_status() != packet::content_requested) {
@@ -266,14 +293,25 @@ void content_protocol::new_content_request(const content_identifier& key, conten
 
 void content_protocol::new_content_store(content_identifier cid, const_payload_buffer_ptr hunk)
 {
+	// New content stores must always be done detached. Clients can't be counted on
+	// to cache unsolicited data but they will store content sources. Even if nodes
+	// generally did cache unsolicited data it could get detached mid-way to the
+	// content's successor due to oob thresholds. In this case we would really rather
+	// the stored content source to be us over some intermediate node who probably isn't
+	// going to hold the content very long.
 	DLOG(INFO) << "New store request for cid " << std::string(cid.publisher);
 	packet::ptr_t pkt(new packet());
 	pkt->destination(cid.publisher);
 	pkt->source(cid.publisher);
 	pkt->name(cid.name);
-	pkt->content_status(packet::content_attached);
 	pkt->protocol(id());
-	pkt->payload(boost::make_shared<payload_content_buffer>(boost::ref(node_), hunk));
+	content_sources::ptr_t self_source(new content_sources(buffer_size(hunk->get())));
+	self_source->sources.insert(std::make_pair(node_.id(), content_sources::source(node_.public_endpoint())));
+	pkt->content_status(packet::content_detached);
+	if (node_.is_v4())
+		pkt->payload(boost::make_shared<payload_content_sources_v4>(self_source));
+	else
+		pkt->payload(boost::make_shared<payload_content_sources_v6>(self_source));
 	node_.local_request(pkt);
 }
 

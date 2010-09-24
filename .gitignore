@@ -9,6 +9,7 @@ Release
 *.log
 *.pdf
 *.conf
+*.sdf
 envs
 bin
 obj

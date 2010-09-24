@@ -207,6 +207,7 @@ mapped_content::const_ptr content_store::put(hunk_descriptor_t desc, std::vector
 	}
 
 	stored_contents->second.desc = desc;
+	desc->last_access = desc->stored = boost::posix_time::second_clock::universal_time();
 
 	std::string path = content_path(buffer(key_buf), true);
 

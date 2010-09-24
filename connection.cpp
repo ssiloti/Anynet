@@ -648,7 +648,7 @@ void connection::send_next_frame()
 			assert(buffer_cast<const boost::uint8_t*>(send_buffers[1])[0] == 0);
 			assert(buffer_size(send_buffers[1]) < 24);
 		}
-		DLOG(INFO) << "Sending " << bytes_transfered << " bytes";
+		DLOG(INFO) << "Sending " << bytes_transfered << " packet bytes";
 
 		boost::asio::async_write(link_.socket,
 		                         send_buffers,
@@ -663,6 +663,8 @@ void connection::send_next_frame()
 			bytes_transfered += buffer_size(*buf);
 		ack_queue_.push_back(pending_ack(frame_queue_.front().entered, bytes_transfered));
 
+		DLOG(INFO) << "Sending " << bytes_transfered << " fragment bytes";
+
 		boost::asio::async_write(link_.socket,
 		                         send_buffers,
 		                         boost::bind(&connection::protocol_frame_sent, shared_from_this(), placeholders::error, placeholders::bytes_transferred));
@@ -673,7 +675,7 @@ void connection::packet_sent(const boost::system::error_code& error, std::size_t
 {
 	if (!error && link_.socket.lowest_layer().is_open()) {
 
-		DLOG(INFO) << std::string(node_.id()) << " Sent " << bytes_transfered << " bytes of content";
+		DLOG(INFO) << std::string(node_.id()) << " Sent " << bytes_transfered << " bytes of packet content";
 
 		node_.sent_content(remote_id(), bytes_transfered);
 		packet_queue_.pop_front();
@@ -695,7 +697,7 @@ void connection::protocol_frame_sent(const boost::system::error_code& error, std
 {
 	if (!error && link_.socket.lowest_layer().is_open()) {
 
-	//	DLOG(INFO) << std::string(node_.id()) << " Sent " << bytes_transfered << " bytes of content";
+		DLOG(INFO) << std::string(node_.id()) << " Sent " << bytes_transfered << " bytes of fragment content";
 	//	update_local_threshold(boost::posix_time::microsec_clock::universal_time() - frame_sent_, bytes_transfered);
 		node_.sent_content(remote_id(), bytes_transfered);
 

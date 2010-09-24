@@ -1,5 +1,4 @@
 check for attached/requested content larger than size_t
-perform all inserts detached
 cache detached content if it makes sense
 better unkown protocol handling, allow everything but attached content
 oob threshold modulation based on crediting

@@ -48,7 +48,7 @@
 #include <boost/utility.hpp>
 #include <deque>
 
-#define FORCE_OOB_TRANSFERS TRUE
+#define FORCE_OOB_THRESHOLD 8000
 
 class local_node;
 class connection;
@@ -308,8 +308,8 @@ private:
 
 	void update_oob_threshold()
 	{
-#if FORCE_OOB_TRANSFERS
-		oob_threshold_ = 0;
+#ifdef FORCE_OOB_THRESHOLD
+		oob_threshold_ = FORCE_OOB_THRESHOLD;
 #else
 		oob_threshold_ = std::min(remote_oob_threshold_, local_oob_threshold_);
 		if (oob_threshold_ < min_oob_threshold)

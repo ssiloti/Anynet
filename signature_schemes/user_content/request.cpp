@@ -132,7 +132,7 @@ const_payload_buffer_ptr content_request::snoop_fragment(local_node& node, const
 	}
 
 	content_sources::sources_t::iterator content_source = sources_->sources.find(src);
-
+	google::FlushLogFiles(google::INFO);
 	direct_request_pending_ = false;
 	--content_source->second.active_request_count;
 

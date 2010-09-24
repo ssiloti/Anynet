@@ -468,14 +468,7 @@ connection::ptr_t local_node::dispatch(packet::ptr_t pkt, const network_key& inn
 
 	if (target != ib_peers_.end()) {
 		DLOG(INFO) << "Got successor peer " << std::string((*target)->remote_id());
-		if (pkt->content_status() == packet::content_detached && content_size < (*target)->oob_threshold()) {
-			// we have detached content but it is smaller than our oob threshold so we could send it attached.
-			// instead of forwarding the sources we will start a local request for the content then send it
-			// attached
-			assert(false);
-		}
-		else
-			(*target)->send(pkt);
+		(*target)->send(pkt);
 		return *target;
 	}
 	/*else if (pkt->content_status() == packet::content_requested) {
@@ -937,7 +930,12 @@ struct hunk_desc_cmp
 
 	double staleness(boost::posix_time::time_duration age, int closer_peers) const
 	{
-		return age.total_seconds() * std::exp(double(closer_peers));
+		// blanket check for now since the only special case is an unstored hunk
+		// which will never get pruned anyways so return min staleness
+		if (age.is_special())
+			return std::numeric_limits<double>::min();
+		else
+			return age.total_seconds() * std::exp(double(closer_peers));
 	}
 
 	const boost::posix_time::ptime now;
@@ -982,14 +980,14 @@ hunk_descriptor_t local_node::cache_store(protocol_id pid, content_identifier id
 {
 	int closer = closer_peers(id.publisher);
 
-//	if (closer < 2) {
+	if (closer < 2) {
 		try_prune_cache(size, closer, boost::posix_time::time_duration(0, 0, 0, 0));
 		stored_hunks_.push_back(stored_hunk(pid, id, size, closer, false));
 		stored_size_ += size;
 		return --stored_hunks_.end();
-//	}
+	}
 
-//	return stored_hunks_.end();
+	return stored_hunks_.end();
 }
 
 bool local_node::try_prune_cache(std::size_t size, int closer_peers, boost::posix_time::time_duration age)
@@ -1008,9 +1006,12 @@ bool local_node::try_prune_cache(std::size_t size, int closer_peers, boost::posi
 		// 1. The current hunk has a lower staleness than the candidate
 		// 2. Pruning all hunks up to the current will free up enough space for the candidate
 		for (stored_hunks_t::iterator hunk = stored_hunks_.begin(); hunk != stored_hunks_.end() && compare(*hunk, new_hunk_staleness); ++hunk) {
+			// skip any hunks which do not have a stored date, these are in the process of being aquired so we
+			// cannot touch them
 			// skip any hunks which have been stored for less than one hour multiplied by e^(-closer_peers)
 			// this is a minimum requirement to maintain network integrity
-			if ((compare.now - hunk->stored).total_seconds() < boost::posix_time::hours(1).total_seconds() * std::exp(double(-closer_peers)))
+			if (!hunk->stored.is_not_a_date_time()
+			    || (compare.now - hunk->stored).total_seconds() < boost::posix_time::hours(1).total_seconds() * std::exp(double(-closer_peers)))
 				continue;
 
 			to_be_pruned.push_back(hunk);

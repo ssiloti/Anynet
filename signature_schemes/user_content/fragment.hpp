@@ -175,8 +175,10 @@ private:
 			return;
 		}
 
+
 		if (status() == status_attached)
 		{
+			DLOG(INFO) << "Receiving fragment payload";
 			framented_content::fragment_buffer payload = protocol->get_fragment_buffer(shared_from_this());
 
 		#if 0

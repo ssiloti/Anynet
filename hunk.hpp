@@ -60,8 +60,8 @@ struct stored_hunk
 {
 	stored_hunk(protocol_id p, content_identifier k, std::size_t s, int closer, bool local)
 		: protocol(p), id(k), size(s), closer_peers(closer), local_requested(local),
-		last_access(boost::posix_time::second_clock::universal_time()),
-		stored(boost::posix_time::second_clock::universal_time())
+		last_access(boost::date_time::not_a_date_time),
+		stored(boost::date_time::not_a_date_time)
 	{}
 	content_identifier id;
 	boost::posix_time::ptime last_access;

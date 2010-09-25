@@ -108,6 +108,8 @@ private:
 	void content_received(connection::ptr_t con, packet::ptr_t pkt);
 	void fragment_received(connection::ptr_t con, boost::shared_ptr<frame_fragment> frag);
 
+	void completed_detached_content_request(hunk_descriptor_t desc, const_payload_buffer_ptr content);
+
 	response_handlers_t response_handlers_;
 };
 

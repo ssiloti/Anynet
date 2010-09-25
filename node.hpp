@@ -178,6 +178,7 @@ public:
 	hunk_descriptor_t cache_remote_request(protocol_id pid, content_identifier id, std::size_t size, boost::posix_time::time_duration request_delta);
 	hunk_descriptor_t load_existing_hunk(protocol_id pid, content_identifier id, std::size_t size);
 	hunk_descriptor_t not_a_hunk() { return stored_hunks_.end(); }
+	void erase_hunk(hunk_descriptor_t desc) { stored_hunks_.erase(desc); }
 
 	// credit accounting
 	void sent_content(const network_key& id, std::size_t bytes) { traffic_stats_.sent_content(id, bytes); }

@@ -140,7 +140,7 @@ void content_protocol::snoop_packet_payload(packet::ptr_t pkt)
 				// to future responses.
 				new_content_request(pkt->content_id(),
 				                    std::size_t(content_size),
-				                    boost::bind(&content_protocol::store_content,
+				                    boost::bind(&content_protocol::completed_detached_content_request,
 				                                shared_from_this_as<content_protocol>(),
 				                                hunk_desc,
 				                                _1));
@@ -344,3 +344,10 @@ void content_protocol::remove_response_handler(content_identifier key, const boo
 	}
 }
 
+void content_protocol::completed_detached_content_request(hunk_descriptor_t desc, const_payload_buffer_ptr content)
+{
+	if (!content)
+		node_.erase_hunk(desc);
+	else
+		store_content(desc, content);
+}

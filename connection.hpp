@@ -272,7 +272,6 @@ private:
 
 	void frame_head_received(const boost::system::error_code& error, std::size_t bytes_transfered);
 	void incoming_packet(packet::ptr_t pkt, std::size_t payload_size);
-//	void incoming_fragment(frame_fragment::ptr_t, std::size_t payload_size);
 	void receive_next_frame();
 
 	template <typename Handler>

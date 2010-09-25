@@ -61,7 +61,8 @@ struct link_handshake
 struct oob_threshold_frame
 {
 	boost::uint8_t type;
-	boost::uint8_t rsvd[3];
+	boost::uint8_t rsvd[2];
+	boost::uint8_t ack;
 	boost::uint8_t oob_threshold[4];
 };
 
@@ -477,16 +478,6 @@ void connection::incoming_packet(packet::ptr_t pkt, std::size_t payload_size)
 	}
 }
 
-#if 0
-void connection::incoming_fragment(frame_fragment::ptr_t frag, std::size_t payload_size)
-{
-	node_.incoming_fragment(shared_from_this(), frag, payload_size);
-	if (!payload_size) {
-		receive_next_frame();
-	}
-}
-#endif
-
 std::size_t connection::oob_threshold_size()
 {
 	return sizeof(oob_threshold_frame);
@@ -494,15 +485,17 @@ std::size_t connection::oob_threshold_size()
 
 void connection::parse_oob_threshold()
 {
+	const oob_threshold_frame* frame = buffer_cast<const oob_threshold_frame*>(link_.received_buffer());
 	// OOB threshold updates double as an ACK for content related messages (network packets, fragments)
 	// This is strictly for timing purposes. Idealy we could use the TCP ack for this but operating systems
 	// don't provide that capability.
-	if (!ack_queue_.empty()) {
-		update_local_threshold( boost::posix_time::microsec_clock::universal_time() - ack_queue_.front().entered, ack_queue_.front().bytes_transfered );
-		ack_queue_.pop_front();
+	for (unsigned acks_remaining = frame->ack; acks_remaining != 0; --acks_remaining) {
+		if (!ack_queue_.empty()) {
+			update_local_threshold( boost::posix_time::microsec_clock::universal_time() - ack_queue_.front().entered, ack_queue_.front().bytes_transfered );
+			ack_queue_.pop_front();
+		}
 	}
 
-	const oob_threshold_frame* frame = buffer_cast<const oob_threshold_frame*>(link_.received_buffer());
 	remote_oob_threshold_ = u32(frame->oob_threshold);
 //	update_oob_threshold();
 
@@ -596,6 +589,10 @@ void connection::send_next_frame()
 	if (outstanding_non_packet_frames_ & frame_bit_oob_threshold_update) {
 		oob_threshold_frame* frame = buffer_cast<oob_threshold_frame*>(link_.send_buffer(sizeof(oob_threshold_frame)));
 		frame->type = frame_oob_threshold_update;
+		unsigned ack_count = ack_sends_needed_ & 0xFF;
+		ack_sends_needed_ -= ack_count;
+		frame->ack = ack_count;
+		frame->rsvd[0] = frame->rsvd[1] = 0;
 		u32(frame->oob_threshold, local_oob_threshold_);
 		boost::asio::async_write(link_.socket,
 		                         const_buffers_1(link_.sendable_buffer()),
@@ -720,7 +717,7 @@ void connection::protocol_frame_sent(const boost::system::error_code& error, std
 void connection::frame_sent(frame_bits frame_bit, const boost::system::error_code& error, std::size_t bytes_transfered)
 {
 //	DLOG(INFO) << "Sent " << bytes_transfered << " bytes for frame type " << frame_bit;
-	if (!(frame_bit & frame_bit_oob_threshold_update && --ack_sends_needed_))
+	if (!(frame_bit & frame_bit_oob_threshold_update && ack_sends_needed_))
 		outstanding_non_packet_frames_ &= ~frame_bit;
 
 	if (error) {

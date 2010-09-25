@@ -90,7 +90,7 @@ public:
 		packed_request* req = buffer_cast<packed_request*>(scratch);
 		pkt->source().encode(req->key);
 		u64(req->content_size, size);
-		return std::vector<const_buffer>(1, buffer(scratch, sizeof(packed_request)));
+		return std::vector<const_buffer>(1, buffer(scratch, sizeof(packed_request) + pkt->name().serialize(scratch + sizeof(packed_request))));
 	}
 
 	static std::size_t parse(packet::ptr_t pkt, const_buffer buf)
@@ -99,7 +99,7 @@ public:
 
 		pkt->source(network_key(req->key));
 		pkt->payload(boost::make_shared<payload_request>(u64(req->content_size)));
-		return sizeof(packed_request);
+		return sizeof(packed_request) + pkt->name().parse(buf + sizeof(packed_request));
 	}
 
 	payload_request(content_size_t s) : size(s) {}
@@ -128,7 +128,7 @@ public:
 		packed_error* error = buffer_cast<packed_error*>(scratch);
 		pkt->source().encode(error->key);
 		u64(error->content_size, size);
-		return std::vector<const_buffer>(1, buffer(scratch, sizeof(packed_error)));
+		return std::vector<const_buffer>(1, buffer(scratch, sizeof(packed_error) + pkt->name().serialize(scratch + sizeof(packed_error))));
 	}
 
 	static std::size_t parse(packet::ptr_t pkt, const_buffer buf)
@@ -137,7 +137,7 @@ public:
 
 		pkt->source(network_key(error->key));
 		pkt->payload(boost::make_shared<payload_failure>(u64(error->content_size)));
-		return sizeof(packed_error);
+		return sizeof(packed_error) + pkt->name().parse(buf + sizeof(packed_error));
 	}
 
 	payload_failure(content_size_t s) : size(s) {}
@@ -259,20 +259,25 @@ public:
 	{
 		packed_detached_sources* s = buffer_cast<packed_detached_sources*>(scratch);
 		int source_send_count = std::min(get()->sources.size(), (buffer_size(scratch) - sizeof(packed_detached_sources)) / sizeof(packed_source_address));
+		std::size_t name_size = pkt->name().serialize(scratch + sizeof(packed_detached_sources));
 
 		pkt->source().encode(s->key);
 		u64(s->size, get()->size);
+		u16(s->rsvd, 0);
 		u16(s->count, source_send_count);
 
 		// start with the last source whose id is less than the requester's, this is the best (i.e. the one he is most likely to have credit with)
 		distance_iterator<content_sources::sources_t> source(get()->sources, pkt->destination());
+		packed_source_address* packed_source = buffer_cast<packed_source_address*>(scratch + sizeof(packed_detached_sources) + name_size);
+		packed_source_address* packed_sources_end = packed_source + source_send_count;
 
-		for (int source_idx = 0; source_idx < source_send_count; ++source_idx) {
-			encode_detached_source(&s->sources[source_idx], *source);
-			++source;
-		}
+		for (; packed_source < packed_sources_end; ++packed_source, ++source)
+			encode_detached_source(packed_source, *source);
 
-		return std::vector<const_buffer>(1, buffer(scratch, sizeof(packed_detached_sources) + sizeof(packed_source_address) * source_send_count));
+		return std::vector<const_buffer>(1, buffer(scratch,
+		                                    sizeof(packed_detached_sources)
+		                                    + sizeof(packed_source_address) * source_send_count
+		                                    + name_size));
 	}
 
 
@@ -280,14 +285,20 @@ public:
 	{
 		const packed_detached_sources* s = buffer_cast<const packed_detached_sources*>(buf);
 		pkt->source(network_key(s->key));
+		std::size_t name_size = pkt->name().parse(buf + sizeof(packed_detached_sources));
 		content_sources::ptr_t sources(protocol.get_content_sources(pkt->content_id(), u64(s->size)));
 		pkt->payload(boost::make_shared<payload_content_sources<address_type> >(sources));
 		int sources_count = u16(s->count);
 
-		for (int source_idx = 0; source_idx < sources_count; ++source_idx) {
-			sources->sources.insert(decode_detached_source(&s->sources[source_idx]));
-		}
-		return sizeof(packed_detached_sources) + sizeof(packed_source_address) * sources_count;
+		const packed_source_address* packed_source = buffer_cast<const packed_source_address*>(buf + sizeof(packed_detached_sources) + name_size);
+		const packed_source_address* packed_sources_end = packed_source + sources_count;
+
+		google::FlushLogFiles(google::INFO);
+
+		for (; packed_source < packed_sources_end; ++packed_source)
+			sources->sources.insert(decode_detached_source(packed_source));
+
+		return sizeof(packed_detached_sources) + name_size + sizeof(packed_source_address) * sources_count;
 	}
 
 	payload_content_sources(content_sources::ptr_t s) : content_sources::ptr_t(s) {}
@@ -307,7 +318,6 @@ private:
 		boost::uint8_t size[8];
 		boost::uint8_t rsvd[2];
 		boost::uint8_t count[2];
-		packed_source_address sources[];
 	};
 
 	void encode_detached_source(packed_source_address* packed_address, const content_sources::sources_t::value_type& src) const

@@ -65,7 +65,6 @@ public:
 	virtual void prune_hunk(const content_identifier& id) {}
 
 	virtual void receive_attached_content(connection::ptr_t con, packet::ptr_t pkt, std::size_t payload_size);
-//	virtual void incoming_fragment(connection::ptr_t con, boost::shared_ptr<frame_fragment> frag, std::size_t payload_size);
 	virtual void incoming_frame(connection::ptr_t con, boost::uint8_t frame_type);
 
 	virtual payload_buffer_ptr get_payload_buffer(std::size_t size) { return payload_buffer_ptr(); }

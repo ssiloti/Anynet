@@ -50,7 +50,7 @@ bool content_sources::source_cmp::operator()(const source& l, const source& r)
 struct packed_header
 {
 	boost::uint8_t frame_type;
-	boost::uint8_t status_name_components;
+	boost::uint8_t status;
 	boost::uint8_t protocol[2];
 	boost::uint8_t destination[network_key::packed_size];
 	boost::uint8_t payload_size[8];
@@ -61,22 +61,15 @@ std::size_t packet::header_size()
 	return sizeof(packed_header);
 }
 
-std::pair<content_size_t, unsigned> packet::parse_header(const_buffer buf)
+content_size_t packet::parse_header(const_buffer buf)
 {
 	const packed_header* header = buffer_cast<const packed_header*>(buf);
 
-	content_status(content_status_t((header->status_name_components & 0xC0) >> 6));
+	content_status(content_status_t(header->status & 0x03));
 	protocol(u16(header->protocol));
 	destination(network_key(header->destination));
 
-	if (content_status() == content_attached)
-		assert(u64(header->payload_size) < 24);
-	else {
-		google::FlushLogFiles(google::INFO);
-		assert(u64(header->payload_size) < 256);
-	}
-
-	return std::make_pair(u64(header->payload_size), header->status_name_components & 0x3F);
+	return u64(header->payload_size);
 }
 
 std::size_t packet::serialize_header(mutable_buffer buf)
@@ -85,10 +78,10 @@ std::size_t packet::serialize_header(mutable_buffer buf)
 	
 	header->frame_type = connection::frame_network_packet;
 	u16(header->protocol, protocol());
-	header->status_name_components = (content_status() << 6) | name().component_count();
+	header->status = content_status();
 	destination().encode(header->destination);
 
-	return sizeof(packed_header) + name().serialize(buf + sizeof(packed_header), false);
+	return sizeof(packed_header);
 }
 
 std::vector<const_buffer> packet::serialize(std::size_t threshold,mutable_buffer scratch)
@@ -107,15 +100,13 @@ std::vector<const_buffer> packet::serialize(std::size_t threshold,mutable_buffer
 		for (std::vector<const_buffer>::const_iterator pbuf = payload_buffers.begin(); pbuf != payload_buffers.end(); ++pbuf)
 			payload_size += buffer_size(*pbuf);
 		// HACK: The payload may have decided to change our status, update it here
-		h->status_name_components = (content_status() << 6) | name().component_count();
+		h->status = content_status();
 		buffers.insert(buffers.end(), payload_buffers.begin(), payload_buffers.end());
 	}
 
 	u64(h->payload_size, payload_size);
 
 	assert(buffer_cast<packed_header*>(scratch)->frame_type == connection::frame_network_packet);
-	google::FlushLogFiles(google::INFO);
-	assert(payload_size < 256);
 	
 	return buffers;
 }

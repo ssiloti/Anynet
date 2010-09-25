@@ -131,9 +131,16 @@ const_payload_buffer_ptr content_request::snoop_fragment(local_node& node, const
 		return const_payload_buffer_ptr();
 	}
 
-	content_sources::sources_t::iterator content_source = sources_->sources.find(src);
-	google::FlushLogFiles(google::INFO);
 	direct_request_pending_ = false;
+
+	if (!sources_)
+		return const_payload_buffer_ptr();
+
+	content_sources::sources_t::iterator content_source = sources_->sources.find(src);
+
+	if (content_source == sources_->sources.end())
+		return const_payload_buffer_ptr();
+
 	--content_source->second.active_request_count;
 
 	switch (frag->status())

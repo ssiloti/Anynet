@@ -61,7 +61,11 @@ public:
 		return 0;
 	}
 
-	virtual void trim(boost::shared_ptr<packet> pkt, std::size_t threshold) const {}
+	virtual boost::shared_ptr<const packet> trim(boost::shared_ptr<const packet> pkt, std::size_t threshold) const
+	{
+		return pkt;
+	}
+
 	virtual std::vector<const_buffer> serialize(boost::shared_ptr<const packet> pkt,
 	                                            std::size_t threshold,
 	                                            mutable_buffer scratch) const = 0;
@@ -94,7 +98,6 @@ public:
 		payload_ = payload;
 	}
 
-	virtual void trim(std::size_t threshold);
 	virtual std::vector<const_buffer> serialize(std::size_t threshold, mutable_buffer scratch) const;
 
 	template <typename Handler>

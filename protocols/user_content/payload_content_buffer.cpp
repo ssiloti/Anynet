@@ -37,16 +37,21 @@
 
 using namespace user_content;
 
-void payload_content_buffer::trim(boost::shared_ptr<packet> pkt, std::size_t threshold) const
+boost::shared_ptr<const packet> payload_content_buffer::trim(boost::shared_ptr<const packet> pkt, std::size_t threshold) const
 {
 	const_buffer buf = payload->get();
 	if (buffer_size(buf) > threshold) {
-		content_sources::ptr_t self_source(new content_sources(buffer_size(buf)));
+		content_sources::ptr_t self_source(boost::make_shared<content_sources>(buffer_size(buf)));
 		self_source->sources.insert(std::make_pair(node_.id(), content_sources::source(node_.public_endpoint())));
-		pkt->content_status(packet::content_detached);
+
+		packet::ptr_t detached_pkt(boost::make_shared<packet>(*pkt));
+		detached_pkt->content_status(packet::content_detached);
 		if (node_.is_v4())
-			pkt->payload(boost::make_shared<payload_content_sources_v4>(self_source));
+			detached_pkt->payload(boost::make_shared<payload_content_sources_v4>(self_source));
 		else
-			pkt->payload(boost::make_shared<payload_content_sources_v6>(self_source));
+			detached_pkt->payload(boost::make_shared<payload_content_sources_v6>(self_source));
+		return detached_pkt;
 	}
+	else
+		return pkt;
 }

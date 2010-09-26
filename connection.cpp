@@ -664,11 +664,6 @@ void connection::send_next_frame()
 	else if (!packet_queue_.empty()) {
 		DLOG(INFO) << "Sending packet from " << std::string(node_.id()) << " to " << std::string(remote_id());
 
-#ifdef SIMULATION
-		if (send_delay_.expires_at() == boost::date_time::not_a_date_time)
-#endif
-			packet_queue_.front().pkt->trim(oob_threshold());
-
 		const std::vector<const_buffer>& send_buffers = packet_queue_.front().pkt->serialize(oob_threshold(), link_.send_buffer());
 		std::size_t bytes_transfered = 0;
 		for (std::vector<const_buffer>::const_iterator buf = send_buffers.begin(); buf != send_buffers.end(); ++buf)
@@ -700,11 +695,6 @@ void connection::send_next_frame()
 	}
 	else if (!frame_queue_.empty()) {
 		DLOG(INFO) << "Sending fragment from " << std::string(node_.id()) << " to " << std::string(remote_id());
-
-#ifdef SIMULATION
-		if (send_delay_.expires_at() == boost::date_time::not_a_date_time)
-#endif
-			frame_queue_.front().frame->trim(oob_threshold());
 
 		const std::vector<const_buffer>& send_buffers = frame_queue_.front().frame->serialize(oob_threshold(), link_.send_buffer());
 		std::size_t bytes_transfered = 0;

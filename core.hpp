@@ -66,7 +66,6 @@ class content_frame
 public:
 	typedef boost::shared_ptr<content_frame> ptr_t;
 
-	virtual void trim(std::size_t threshold) {}
 	virtual std::vector<const_buffer> serialize(std::size_t threshold, mutable_buffer scratch) const = 0;
 };
 

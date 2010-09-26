@@ -47,7 +47,7 @@ public:
 		return buffer_size(payload->get());
 	}
 
-	virtual void trim(boost::shared_ptr<packet> pkt, std::size_t threshold) const;
+	virtual boost::shared_ptr<const packet> trim(boost::shared_ptr<const packet> pkt, std::size_t threshold) const;
 
 	virtual std::vector<const_buffer> serialize(boost::shared_ptr<const packet> pkt, std::size_t threshold, mutable_buffer scratch) const
 	{

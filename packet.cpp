@@ -78,24 +78,20 @@ std::size_t packet::serialize_header(mutable_buffer buf) const
 	return sizeof(packed_header);
 }
 
-void packet::trim(std::size_t threshold)
-{
-	payload_->trim(shared_from_this(), threshold);
-}
-
 std::vector<const_buffer> packet::serialize(std::size_t threshold, mutable_buffer scratch) const
 {
 	DLOG(INFO) << "Sending packet dest=" << std::string(destination());
 
+	const_ptr_t pkt(payload_->trim(shared_from_this(), threshold));
+
 	std::vector<const_buffer> buffers;
-	buffers.push_back(buffer(scratch, serialize_header(scratch)));
+	buffers.push_back(buffer(scratch, pkt->serialize_header(scratch)));
 
 	content_size_t payload_size = 0;
-	packed_header* h = buffer_cast<packed_header*>(scratch);
 
-	if (payload_.get() != NULL) {
+	if (pkt->payload_.get() != NULL) {
 		const std::vector<const_buffer>&
-			payload_buffers = payload_->serialize(shared_from_this(), threshold, scratch + buffer_size(buffers.back()));
+			payload_buffers = pkt->payload_->serialize(pkt, threshold, scratch + buffer_size(buffers.back()));
 
 		for (std::vector<const_buffer>::const_iterator pbuf = payload_buffers.begin(); pbuf != payload_buffers.end(); ++pbuf)
 			payload_size += buffer_size(*pbuf);
@@ -103,7 +99,7 @@ std::vector<const_buffer> packet::serialize(std::size_t threshold, mutable_buffe
 		buffers.insert(buffers.end(), payload_buffers.begin(), payload_buffers.end());
 	}
 
-	u64(h->payload_size, payload_size);
+	u64(buffer_cast<packed_header*>(scratch)->payload_size, payload_size);
 
 	assert(buffer_cast<packed_header*>(scratch)->frame_type == connection::frame_network_packet);
 	

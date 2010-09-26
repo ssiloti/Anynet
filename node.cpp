@@ -633,8 +633,8 @@ void local_node::packet_received(connection::ptr_t con, packet::ptr_t pkt)
 
 	if ( ::distance(pkt->destination(), id()) < ::distance(pkt->destination(), con->remote_id()) ) {
 		// This is from an in-band peer and we are closer to the destination than the sender, go ahead and dispatch normally
-
-		if (!dispatch(pkt) && pkt->content_status() == packet::content_requested) {
+		bool we_are_successor = !dispatch(pkt);
+		if (we_are_successor && pkt->content_status() == packet::content_requested) {
 			// We are the successor for the requested content but we don't have it, time to go into desperation mode
 			// and request the content from all of our peers. If one of them has it they will return it
 			// enabling us to complete the request. More imporatantly this is the mechanism by which
@@ -680,6 +680,14 @@ void local_node::packet_received(connection::ptr_t con, packet::ptr_t pkt)
 				protocol.pickup_crumb(pkt);
 			}
 		}
+#ifdef SIMULATION
+		else if (we_are_successor
+		         && pkt->content_status() == packet::content_detached
+		         && pkt->source() == pkt->destination()
+		         && pkt->protocol() == signature_sha256) {
+			sim.new_non_authoritative(pkt->publisher());
+		}
+#endif
 	}
 	else if (pkt->content_status() == packet::content_requested) {
 		// peer is closer than us to the destination and we couldn't satisfy it ourselves, we can't foward this

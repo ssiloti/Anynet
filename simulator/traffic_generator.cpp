@@ -63,7 +63,6 @@ void traffic_generator::tick(int time)
 		std::memcpy(buffer_cast<char*>(payload.get()), content.str().data(), content.str().size());
 		content_identifier cid(non_auth.insert_hunk(payload));
 		next_non_authoritative_insert_ = sim.insert_non_authoritative_interval();
-		sim.new_non_authoritative(cid.publisher);
 		DLOG(INFO) << "New stored non-authoritative hunk (" << content.str() << ") " << std::string(cid.publisher);
 	}
 	if (time == next_non_authoritative_get_) {

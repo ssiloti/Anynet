@@ -34,12 +34,22 @@
 #include "protocols/user_content/non_authoritative.hpp"
 #include "node.hpp"
 
-struct packed_content
+namespace
 {
-	boost::uint8_t chunk_size;
-	boost::uint8_t rsvd[3];
-	boost::uint8_t content[];
-};
+	struct packed_content
+	{
+		boost::uint8_t chunk_size;
+		boost::uint8_t rsvd[3];
+		boost::uint8_t content[];
+	};
+}
+
+void non_authoritative::create(local_node& node)
+{
+	boost::shared_ptr<non_authoritative> ptr(new non_authoritative(node));
+	ptr->register_handler();
+	ptr->start_vacume();
+}
 
 non_authoritative::insert_buffer::insert_buffer(mapped_content::ptr b)
 	: backing(b)
@@ -69,9 +79,9 @@ const_buffer non_authoritative::insert_buffer::get() const
 }
 
 non_authoritative::non_authoritative(local_node& node)
-	: user_content::content_protocol(node, protocol_id), stored_hunks_(node.config().content_store_path() + "/non_authoritative", protocol_id, node)
-{
-}
+	: user_content::content_protocol(node, protocol_id)
+	, stored_hunks_(node.config().content_store_path() + "/non_authoritative", protocol_id, node)
+{}
 
 non_authoritative::insert_buffer non_authoritative::get_insertion_buffer(std::size_t size)
 {

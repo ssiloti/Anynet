@@ -36,9 +36,9 @@
 
 #include "fragmented_content.hpp"
 #include "content_protocol.hpp"
-#include "link.hpp"
-#include "content.hpp"
-#include "hunk.hpp"
+#include <link.hpp>
+#include <content.hpp>
+#include <hunk.hpp>
 #include <boost/asio/read.hpp>
 #include <boost/asio/write.hpp>
 #include <boost/asio/ip/address.hpp>
@@ -64,42 +64,40 @@ public:
 	               std::size_t o,
 	               std::size_t s,
 	               const_payload_buffer_ptr payload = const_payload_buffer_ptr())
-		: protocol_(proto), id_(i), offset_(o), size_(s), payload_(payload), status_(payload ? status_attached : status_requested)
+		: protocol_(proto)
+		, id_(i)
+		, offset_(o)
+		, size_(s)
+		, payload_(payload)
+		, status_(payload ? status_attached : status_requested)
 	{}
 
 	frame_fragment(protocol_id proto, content_identifier i = content_identifier())
-		: protocol_(proto), id_(i), status_(status_failed) {}
+		: protocol_(proto)
+		, id_(i)
+		, status_(status_failed)
+	{}
 
-	//frame_fragment() : status_(status_failed) {}
-
-	protocol_id protocol() const { return protocol_; }
-	const content_identifier& id() const { return id_; }
-	std::size_t offset() const { return offset_; }
-	std::size_t size() const { return size_; }
-	void trim_to(std::size_t s) { size_ = std::min(size_, s); }
+	protocol_id protocol() const             { return protocol_; }
+	const content_identifier& id() const     { return id_; }
+	std::size_t offset() const               { return offset_; }
+	std::size_t size() const                 { return size_; }
+	void trim_to(std::size_t s)              { size_ = std::min(size_, s); }
 	void payload(const_payload_buffer_ptr p) { payload_ = p; }
 
-	fragment_status status() const { return status_; }
+	fragment_status status() const           { return status_; }
 
-	const_buffer buf() const { return buffer(payload_->get() + offset_, size_); }
+	const_buffer buf() const                 { return buffer(payload_->get() + offset_, size_); }
 
-	bool is_request() { return status_ == status_requested; }
+	bool is_request()                        { return status_ == status_requested; }
 	void to_request(std::size_t o, std::size_t s);
 
 	void to_reply(const_payload_buffer_ptr p);
-	void to_reply() { status_ = status_failed; }
+	void to_reply()                          { status_ = status_failed; }
 
 	virtual std::vector<const_buffer> serialize(std::size_t threshold, mutable_buffer scratch) const;
+	virtual bool done(std::size_t bytes_transfered);
 
-	virtual bool done(std::size_t bytes_transfered)
-	{
-		if (status_ == status_attached) {
-			std::size_t payload_size = bytes_transfered - header_size() - id().name.serialize(mutable_buffer(), false);
-			offset_ += payload_size;
-			size_ -= payload_size;
-		}
-		return size() == 0 || status() != status_attached;
-	}
 	virtual void send_failure(local_node& node, const network_key& dest);
 
 	template <typename Handler>

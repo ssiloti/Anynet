@@ -36,6 +36,7 @@
 #include "config.hpp"
 #include <boost/asio/read.hpp>
 #include <boost/bind/protect.hpp>
+#include <boost/make_shared.hpp>
 #include <algorithm>
 #include <cstring>
 
@@ -45,35 +46,38 @@
 
 const boost::posix_time::millisec connection::target_latency(100);
 
-template <typename Adr>
-struct link_handshake
+namespace
 {
-	boost::uint8_t sig[2];
-	boost::uint8_t protocol;
-	boost::uint8_t type;
-	boost::uint8_t remote_ip[Adr::bytes_type::static_size];
-	boost::uint8_t rsvd[2];
-	boost::uint8_t incoming_port[2];
-	boost::uint8_t supported_protocol_count;
-	boost::uint8_t supported_protocols[1][2];
-};
+	template <typename Adr>
+	struct link_handshake
+	{
+		boost::uint8_t sig[2];
+		boost::uint8_t protocol;
+		boost::uint8_t type;
+		boost::uint8_t remote_ip[Adr::bytes_type::static_size];
+		boost::uint8_t rsvd[2];
+		boost::uint8_t incoming_port[2];
+		boost::uint8_t supported_protocol_count;
+		boost::uint8_t supported_protocols[1][2];
+	};
 
-struct oob_threshold_frame
-{
-	boost::uint8_t type;
-	boost::uint8_t rsvd[2];
-	boost::uint8_t ack;
-	boost::uint8_t oob_threshold[4];
-};
+	struct oob_threshold_frame
+	{
+		boost::uint8_t type;
+		boost::uint8_t rsvd[2];
+		boost::uint8_t ack;
+		boost::uint8_t oob_threshold[4];
+	};
 
-template <typename Adr>
-struct successor_frame
-{
-	boost::uint8_t type;
-	boost::uint8_t rsvd;
-	boost::uint8_t sucessor_port[2];
-	boost::uint8_t sucessor_ip[Adr::bytes_type::static_size];
-};
+	template <typename Adr>
+	struct successor_frame
+	{
+		boost::uint8_t type;
+		boost::uint8_t rsvd;
+		boost::uint8_t sucessor_port[2];
+		boost::uint8_t sucessor_ip[Adr::bytes_type::static_size];
+	};
+}
 
 connection::connection(local_node& node, routing_type rtype)
 	: node_(node)
@@ -120,11 +124,22 @@ connection::ptr_t connection::connect(local_node& node, ip::tcp::endpoint peer, 
 	ptr_t con(new connection(node, rtype));
 	con->starting_connection();
 	con->incoming_port_ = peer.port();
-	con->link_.socket.lowest_layer().async_connect( peer, boost::bind(&connection::ssl_handshake,
-	                                                                  con,
-	                                                                  boost::asio::ssl::stream_base::client,
-	                                                                  placeholders::error) );
+	con->link_.socket.lowest_layer().async_connect(peer, boost::bind(&connection::ssl_handshake,
+	                                                                 con,
+	                                                                 boost::asio::ssl::stream_base::client,
+	                                                                 placeholders::error));
 	return con;
+}
+
+void connection::accept(local_node& node, ip::tcp::acceptor& incoming)
+{
+	ptr_t con(new connection(node, ib));
+	con->starting_connection();
+	incoming.async_accept(con->link_.socket.lowest_layer(),
+	                      boost::bind(&connection::connection_accepted,
+	                      con,
+	                      placeholders::error,
+	                      boost::ref(incoming)) );
 }
 
 void connection::connection_accepted(const boost::system::error_code& error, ip::tcp::acceptor& incoming)
@@ -132,11 +147,11 @@ void connection::connection_accepted(const boost::system::error_code& error, ip:
 	if (!error && lifecycle_ == connecting) {
 		ptr_t con(new connection(node_, ib));
 		con->starting_connection();
-		incoming.async_accept( con->link_.socket.lowest_layer(),
-		                       boost::bind(&connection::connection_accepted,
-		                                   con,
-		                                   placeholders::error,
-		                                   boost::ref(incoming)) );
+		incoming.async_accept(con->link_.socket.lowest_layer(),
+		                      boost::bind(&connection::connection_accepted,
+		                                  con,
+		                                  placeholders::error,
+		                                  boost::ref(incoming)));
 		
 		ssl_handshake(boost::asio::ssl::stream_base::server, boost::system::error_code());
 	}
@@ -156,7 +171,10 @@ void connection::ssl_handshake(boost::asio::ssl::stream_base::handshake_type typ
 		return;
 	}
 
-	link_.socket.async_handshake(type, boost::bind(&connection::write_handshake, shared_from_this(), boost::asio::placeholders::error));
+	link_.socket.async_handshake(type,
+	                             boost::bind(&connection::write_handshake,
+	                                         shared_from_this(),
+	                                         boost::asio::placeholders::error));
 }
 
 void connection::write_handshake(const boost::system::error_code& error)
@@ -502,7 +520,8 @@ void connection::parse_oob_threshold()
 	// don't provide that capability.
 	for (unsigned acks_remaining = frame->ack; acks_remaining != 0; --acks_remaining) {
 		if (!ack_queue_.empty()) {
-			update_local_threshold( boost::posix_time::microsec_clock::universal_time() - ack_queue_.front().entered, ack_queue_.front().bytes_transfered );
+			update_local_threshold(boost::posix_time::microsec_clock::universal_time() - ack_queue_.front().entered,
+			                       ack_queue_.front().bytes_transfered );
 			ack_queue_.pop_front();
 		}
 	}
@@ -674,7 +693,10 @@ void connection::send_next_frame()
 
 		boost::asio::async_write(link_.socket,
 		                         send_buffers,
-		                         boost::bind(&connection::packet_sent, shared_from_this(), placeholders::error, placeholders::bytes_transferred));
+		                         boost::bind(&connection::packet_sent,
+		                                     shared_from_this(),
+		                                     placeholders::error,
+		                                     placeholders::bytes_transferred));
 	}
 	else if (!frame_queue_.empty()) {
 		DLOG(INFO) << "Sending fragment from " << std::string(node_.id()) << " to " << std::string(remote_id());
@@ -703,14 +725,16 @@ void connection::send_next_frame()
 
 		boost::asio::async_write(link_.socket,
 		                         send_buffers,
-		                         boost::bind(&connection::protocol_frame_sent, shared_from_this(), placeholders::error, placeholders::bytes_transferred));
+		                         boost::bind(&connection::protocol_frame_sent,
+		                                     shared_from_this(),
+		                                     placeholders::error,
+		                                     placeholders::bytes_transferred));
 	}
 }
 
 void connection::packet_sent(const boost::system::error_code& error, std::size_t bytes_transfered)
 {
 	if (!error && link_.socket.lowest_layer().is_open()) {
-
 		DLOG(INFO) << std::string(node_.id()) << " Sent " << bytes_transfered << " bytes of packet content";
 
 		node_.sent_content(remote_id(), bytes_transfered);

@@ -34,7 +34,7 @@
 #ifndef USER_CONTENT_PAYLOAD_CONTENT_BUFFER_HPP
 #define USER_CONTENT_PAYLOAD_CONTENT_BUFFER_HPP
 
-#include "node.hpp"
+#include <node.hpp>
 
 namespace user_content
 {
@@ -47,19 +47,7 @@ public:
 		return buffer_size(payload->get());
 	}
 
-	virtual void trim(boost::shared_ptr<packet> pkt, std::size_t threshold) const
-	{
-		const_buffer buf = payload->get();
-		if (buffer_size(buf) > threshold) {
-			content_sources::ptr_t self_source(new content_sources(buffer_size(buf)));
-			self_source->sources.insert(std::make_pair(node_.id(), content_sources::source(node_.public_endpoint())));
-			pkt->content_status(packet::content_detached);
-			if (node_.is_v4())
-				pkt->payload(boost::make_shared<payload_content_sources_v4>(self_source));
-			else
-				pkt->payload(boost::make_shared<payload_content_sources_v6>(self_source));
-		}
-	}
+	virtual void trim(boost::shared_ptr<packet> pkt, std::size_t threshold) const;
 
 	virtual std::vector<const_buffer> serialize(boost::shared_ptr<const packet> pkt, std::size_t threshold, mutable_buffer scratch) const
 	{

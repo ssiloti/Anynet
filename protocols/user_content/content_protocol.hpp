@@ -39,10 +39,10 @@
 #include "user_content_fwd.hpp"
 #include "fragmented_content.hpp"
 #include "request.hpp"
-#include "hunk.hpp"
+#include <hunk.hpp>
 #include <protocol.hpp>
-#include "packet.hpp"
-#include "core.hpp"
+#include <packet.hpp>
+#include <core.hpp>
 #include <boost/function.hpp>
 #include <boost/optional.hpp>
 #include <vector>

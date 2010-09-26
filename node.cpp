@@ -48,27 +48,85 @@
 #include "simulator.hpp"
 #endif
 
-int verify_callback(int ok, ::X509_STORE_CTX *store)
+namespace
 {
-	if (!ok) {
-		if (::X509_STORE_CTX_get_error(store) == X509_V_ERR_DEPTH_ZERO_SELF_SIGNED_CERT)
-			ok = 1;
+	int verify_callback(int ok, ::X509_STORE_CTX *store)
+	{
+		if (!ok) {
+			if (::X509_STORE_CTX_get_error(store) == X509_V_ERR_DEPTH_ZERO_SELF_SIGNED_CERT)
+				ok = 1;
+		}
+
+		return ok;
 	}
 
-	return ok;
+	struct connection_remote_endpoint_comparator
+	{
+		connection_remote_endpoint_comparator(ip::tcp::endpoint peer) : ep(peer) {}
+
+		bool operator()(connection::ptr_t con)
+		{
+			return con->remote_endpoint() == ep;
+		}
+
+		ip::tcp::endpoint ep;
+	};
+
+	struct oob_connection_remote_endpoint_comparator
+	{
+		oob_connection_remote_endpoint_comparator(ip::tcp::endpoint peer) : ep(peer) {}
+
+		bool operator()(local_node::oob_peer::ptr_t peer)
+		{
+			return peer->con->remote_endpoint() == ep;
+		}
+
+		ip::tcp::endpoint ep;
+	};
+
+	struct hunk_descriptor_comparator
+	{
+		hunk_descriptor_comparator() : now(boost::posix_time::second_clock::universal_time()) {}
+
+		bool operator()(const stored_hunk& l, const stored_hunk& r) const
+		{
+			return staleness(now - l.last_access, l.closer_peers) > staleness(now - r.last_access, r.closer_peers);
+		}
+
+		bool operator()(const stored_hunk& l, double r) const
+		{
+			return staleness(now - l.last_access, l.closer_peers) > r;
+		}
+
+		double staleness(boost::posix_time::time_duration age, int closer_peers) const
+		{
+			// blanket check for now since the only special case is an unstored hunk
+			// which will never get pruned anyways so return min staleness
+			if (age.is_special())
+				return std::numeric_limits<double>::min();
+			else
+				return age.total_seconds() * std::exp(double(closer_peers));
+		}
+
+		const boost::posix_time::ptime now;
+	};
 }
 
 local_node::local_node(boost::asio::io_service& io_service, client_config& config)
-	: config_(config), acceptor_(io_service, ip::tcp::endpoint(ip::address::from_string(config.listen_ip()), config.listen_port())),
-	  public_endpoint_(acceptor_.local_endpoint()), created_(boost::posix_time::second_clock::universal_time()), stored_size_(0),
-	  traffic_stats_(io_service, "./" + config.content_store_path() + "/traffic.db", client_key_), context(io_service, boost::asio::ssl::context::tlsv1),
-	  client_key_(config.content_store_path() + "/client_id.pem"), replication_min_dist_(key_max)
+	: config_(config)
+	, acceptor_(io_service, ip::tcp::endpoint(ip::address::from_string(config.listen_ip())
+	, config.listen_port()))
+	, public_endpoint_(acceptor_.local_endpoint())
+	, created_(boost::posix_time::second_clock::universal_time())
+	, stored_size_(0)
+	, traffic_stats_(io_service, "./" + config.content_store_path() + "/traffic.db", client_key_)
+	, context(io_service, boost::asio::ssl::context::tlsv1)
+	, client_key_(config.content_store_path() + "/client_id.pem")
+	, replication_min_dist_(key_max)
 {
 	std::string client_id_path(config.content_store_path() + "/client_id.pem");
 
 	context.set_options(boost::asio::ssl::context::single_dh_use);
-//	context_.set_verify_mode(boost::asio::ssl::context::verify_peer |
-//	                         boost::asio::ssl::context::verify_fail_if_no_peer_cert);
 	context.use_certificate_chain_file(client_id_path.c_str());
 	context.use_private_key_file(client_id_path.c_str(), boost::asio::ssl::context::pem);
 //	context.use_tmp_dh_file("dh512.pem");
@@ -266,7 +324,10 @@ ip::tcp::endpoint local_node::predecessor_endpoint(const network_key& key)
 		return public_endpoint();
 }
 
-std::vector<connection::ptr_t>::iterator local_node::sucessor(const network_key& key, const network_key& inner_id, content_size_t content_size)
+std::vector<connection::ptr_t>::iterator
+local_node::sucessor(const network_key& key,
+                     const network_key& inner_id,
+                     content_size_t content_size)
 {
 	return best_peer<distance>(id(), inner_id, key, content_size);
 }
@@ -379,7 +440,11 @@ connection::ptr_t local_node::local_request(packet::ptr_t pkt, const network_key
 		// we don't want this packet going back through the normal dispatch path
 		pkt->mark_direct();
 
-		std::vector<connection::ptr_t>::iterator target = best_peer<distance>(pkt->destination() + 1, inner_id, pkt->destination(), 0);
+		std::vector<connection::ptr_t>::iterator
+			target = best_peer<distance>(pkt->destination() + 1,
+			                             inner_id,
+			                             pkt->destination(),
+			                             0);
 
 		if (target != ib_peers_.end()) {
 			(*target)->send(pkt);
@@ -390,39 +455,23 @@ connection::ptr_t local_node::local_request(packet::ptr_t pkt, const network_key
 	return connection::ptr_t();
 }
 
-struct con_ep_cmp
-{
-	con_ep_cmp(ip::tcp::endpoint peer) : ep(peer) {}
-
-	bool operator()(connection::ptr_t con)
-	{
-		return con->remote_endpoint() == ep;
-	}
-
-	ip::tcp::endpoint ep;
-};
-
-struct oob_con_ep_cmp
-{
-	oob_con_ep_cmp(ip::tcp::endpoint peer) : ep(peer) {}
-
-	bool operator()(local_node::oob_peer::ptr_t peer)
-	{
-		return peer->con->remote_endpoint() == ep;
-	}
-
-	ip::tcp::endpoint ep;
-};
-
 void local_node::direct_request(ip::tcp::endpoint peer, protocol_frame::ptr_t frag)
 {
-	std::vector<connection::ptr_t>::iterator con_iter = std::find_if(ib_peers_.begin(), ib_peers_.end(), con_ep_cmp(peer));
+	std::vector<connection::ptr_t>::iterator
+		con_iter = std::find_if(ib_peers_.begin(),
+		                        ib_peers_.end(),
+		                        connection_remote_endpoint_comparator(peer));
 	connection::ptr_t con;
 
 	if (con_iter == ib_peers_.end()) {
-		std::vector<oob_peer::ptr_t>::iterator ocon_iter = std::find_if(oob_peers_.begin(), oob_peers_.end(), oob_con_ep_cmp(peer));
+		std::vector<oob_peer::ptr_t>::iterator
+			ocon_iter = std::find_if(oob_peers_.begin(),
+			                         oob_peers_.end(),
+			                         oob_connection_remote_endpoint_comparator(peer));
 		if (ocon_iter == oob_peers_.end()) {
-			con_iter = std::find_if(connecting_peers_.begin(), connecting_peers_.end(), con_ep_cmp(peer));
+			con_iter = std::find_if(connecting_peers_.begin(),
+			                        connecting_peers_.end(),
+			                        connection_remote_endpoint_comparator(peer));
 			if (con_iter == connecting_peers_.end())
 				con = connection::connect(*this, peer, connection::oob);
 			else
@@ -471,15 +520,6 @@ connection::ptr_t local_node::dispatch(packet::ptr_t pkt, const network_key& inn
 		(*target)->send(pkt);
 		return *target;
 	}
-	/*else if (pkt->content_status() == packet::content_requested) {
-			DLOG(INFO) << "Failed to process packet, dest=" << std::string(pkt->destination());
-			pkt->to_reply(packet::content_failure);
-
-			if (!local_request)
-				snoop(pkt);
-
-			return dispatch(pkt);
-	}*/
 	else
 		return connection::ptr_t();
 }
@@ -525,7 +565,10 @@ void local_node::packet_received(connection::ptr_t con, packet::ptr_t pkt)
 	if (con->accepts_ib_traffic() && pkt->content_status() == packet::content_requested)
 		protocol.drop_crumb(pkt, con);
 	else if (!con->accepts_ib_traffic()) {
-		std::vector<oob_peer::ptr_t>::iterator oob_peer_iter = std::find_if(oob_peers_.begin(), oob_peers_.end(), oob_con_ep_cmp(con->remote_endpoint()));
+		std::vector<oob_peer::ptr_t>::iterator
+			oob_peer_iter = std::find_if(oob_peers_.begin(),
+			                             oob_peers_.end(),
+			                             oob_connection_remote_endpoint_comparator(con->remote_endpoint()));
 		if (oob_peer_iter != oob_peers_.end())
 			(*oob_peer_iter)->reset_timeout();
 	}
@@ -564,11 +607,11 @@ void local_node::packet_received(connection::ptr_t con, packet::ptr_t pkt)
 //		return;
 //	}
 
-	if ( pkt->content_status() == packet::content_failure && ::distance(pkt->source(), id()) < ::distance(pkt->source(), con->remote_id()) ) {
-		// we got a failure on content which we are closer to than the sender, we must have been deparate so lets continue the desperation
-
-		//std::vector<connection::ptr_t>::iterator target = best_peer<distance>(pkt->source() + 1, con->remote_id() - 1, pkt->source(), 0);
-
+	if ( pkt->content_status() == packet::content_failure
+		 && ::distance(pkt->source(), id()) < ::distance(pkt->source(), con->remote_id()) )
+	{
+		// we got a failure on content which we are closer to than the sender
+		// we must have been deparate so lets continue the desperation
 		network_key inner_id(con->remote_id() - 1);
 		std::vector<connection::ptr_t>::iterator target;
 
@@ -696,39 +739,6 @@ void local_node::packet_received(connection::ptr_t con, packet::ptr_t pkt)
 		con->send(pkt);
 	}
 }
-
-#if 0
-void local_node::incoming_fragment(connection::ptr_t con, frame_fragment::ptr_t frag, std::size_t payload_size)
-{
-	if (!frag) {
-		// There was an error receiving the packet, don't bother trying to receive another, just let the connection die
-		disconnect_peer(con);
-		return;
-	}
-
-	fragmented_protocol::ptr_t protocol_handler = boost::dynamic_pointer_cast<fragmented_protocol>(validate_protocol(frag->protocol()));
-
-	if (!protocol_handler) {
-		receive_failure(con);
-		return;
-	}
-
-	protocol_handler->incoming_fragment(con, frag, payload_size);
-}
-
-void local_node::fragment_received(connection::ptr_t con, frame_fragment::ptr_t frag)
-{
-	frame_fragment::fragment_status incoming_status = frag->status();
-
-	if (incoming_status == frame_fragment::status_attached)
-		traffic_stats_.received_content(con->remote_id(), frag->size());
-
-	boost::static_pointer_cast<fragmented_protocol>(validate_protocol(frag->protocol()))->snoop_fragment(con->remote_id(), frag);
-
-	if (incoming_status == frame_fragment::status_requested)
-		direct_request(con->remote_endpoint(), frag);
-}
-#endif
 
 void local_node::incoming_protocol_frame(connection::ptr_t con, protocol_id protocol, boost::uint8_t frame_type)
 {
@@ -922,33 +932,6 @@ void local_node::update_threshold_stats()
 	avg_oob_threshold_ = sum / ib_peers_.size();
 }
 
-struct hunk_desc_cmp
-{
-	hunk_desc_cmp() : now(boost::posix_time::second_clock::universal_time()) {}
-
-	bool operator()(const stored_hunk& l, const stored_hunk& r) const
-	{
-		return staleness(now - l.last_access, l.closer_peers) > staleness(now - r.last_access, r.closer_peers);
-	}
-
-	bool operator()(const stored_hunk& l, double r) const
-	{
-		return staleness(now - l.last_access, l.closer_peers) > r;
-	}
-
-	double staleness(boost::posix_time::time_duration age, int closer_peers) const
-	{
-		// blanket check for now since the only special case is an unstored hunk
-		// which will never get pruned anyways so return min staleness
-		if (age.is_special())
-			return std::numeric_limits<double>::min();
-		else
-			return age.total_seconds() * std::exp(double(closer_peers));
-	}
-
-	const boost::posix_time::ptime now;
-};
-
 hunk_descriptor_t local_node::cache_local_request(protocol_id pid, content_identifier id, std::size_t size)
 {
 	stored_hunks_t::iterator hunk = stored_hunks_.begin();
@@ -1002,7 +985,7 @@ bool local_node::try_prune_cache(std::size_t size, int closer_peers, boost::posi
 {
 	// only bother looking for hunks to prune if we don't already have enough free space
 	if (stored_size_ + size > config_.target_store_size()) {
-		hunk_desc_cmp compare;
+		hunk_descriptor_comparator compare;
 		boost::uint64_t needed_bytes_ = size - (config_.target_store_size() - stored_size_);
 		double new_hunk_staleness = compare.staleness(age, closer_peers);
 		std::vector<stored_hunks_t::iterator> to_be_pruned;
@@ -1049,4 +1032,3 @@ hunk_descriptor_t local_node::load_existing_hunk(protocol_id pid, content_identi
 	stored_size_ += size;
 	return --stored_hunks_.end();
 }
-

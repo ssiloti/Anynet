@@ -48,7 +48,11 @@ struct known_peers::known_peer::packed
 };
 
 known_peers::known_peer::known_peer(packed* data)
-	: total_sent_(0), total_received_(0), pubkey_(NULL), endpoint_(data->ip), rollover_(data->rollover)
+	: total_sent_(0)
+	, total_received_(0)
+	, pubkey_(NULL)
+	, endpoint_(data->ip)
+	, rollover_(data->rollover)
 {
 	boost::posix_time::time_duration since_rollover = boost::posix_time::second_clock::universal_time() - rollover_;
 	int backed_rollovers = std::min(since_rollover.hours() / 24, long(days));
@@ -74,7 +78,9 @@ known_peers::known_peer::known_peer(packed* data)
 	}
 }
 
-void known_peers::known_peer::do_rollover(packed* data, boost::posix_time::ptime now, boost::uint64_t average_bytes_sent_per_day)
+void known_peers::known_peer::do_rollover(packed* data,
+                                          boost::posix_time::ptime now,
+                                          boost::uint64_t average_bytes_sent_per_day)
 {
 	using boost::posix_time::time_duration;
 
@@ -88,9 +94,9 @@ void known_peers::known_peer::do_rollover(packed* data, boost::posix_time::ptime
 		data->received[rollovers] = data->received[days - backed_rollovers + rollovers];
 
 		data->credited = std::max(data->credited, now - boost::posix_time::hours(24 * (backed_rollovers - rollovers - 1)))
-			           + time_duration(time_duration::hour_type(double(received_today_) / double(average_bytes_sent_per_day) * 24),
-			                           time_duration::min_type((double(received_today_) / double(average_bytes_sent_per_day) * (24 * 3600))) % 3600,
-			                           0, 0);
+		               + time_duration(time_duration::hour_type(double(received_today_) / double(average_bytes_sent_per_day) * 24),
+		                               time_duration::min_type((double(received_today_) / double(average_bytes_sent_per_day) * (24 * 3600))) % 3600,
+		                               0, 0);
 	}
 
 	for (int i = days - backed_rollovers; i < days; ++i) {
@@ -114,12 +120,14 @@ void known_peers::known_peer::do_rollover(packed* data, boost::posix_time::ptime
 known_peers::iterator::iterator(const known_peers& peers, const network_key& target)
 	: peers_(peers)
 {
+	using namespace boost::posix_time;
+
 	sig_buf_.resize(peers_.signer_.signature_length());
 
 
 	boost::uint64_t bytes_per_day = peers_.average_bytes_sent_per_day();
-	boost::posix_time::ptime now = boost::posix_time::second_clock::universal_time();
-	boost::posix_time::time_duration max_credit = peers_.max_credited_ - now;
+	ptime now = second_clock::universal_time();
+	time_duration max_credit = peers_.max_credited_ - now;
 
 	distance_iterator<known_peers::peers_t> credit(peers_.peers_, target);
 
@@ -140,8 +148,12 @@ known_peers::iterator::iterator(const known_peers& peers, const network_key& tar
 }
 
 known_peers::known_peers(boost::asio::io_service& io_service, const std::string& db_path, const author& signer)
-	: db_(NULL, 0), total_sent_(0), total_received_(0), next_rollover_(io_service), max_credited_(boost::date_time::min_date_time),
-	  signer_(signer)
+	: db_(NULL, 0)
+	, total_sent_(0)
+	, total_received_(0)
+	, next_rollover_(io_service)
+	, max_credited_(boost::date_time::min_date_time)
+	, signer_(signer)
 {
 	db_.open(NULL, db_path.c_str(), NULL, DB_BTREE, DB_CREATE, 0);
 
@@ -181,32 +193,17 @@ void known_peers::sent_content(const network_key& id, std::size_t bytes)
 
 void known_peers::received_content(const network_key& id, std::size_t bytes)
 {
-	known_peers::peers_t::iterator peer = transfered_content(id, bytes, offsetof(known_peer::packed, received[known_peer::days-1]));
+	known_peers::peers_t::iterator
+		peer = transfered_content(id,
+		                          bytes,
+		                          offsetof(known_peer::packed, received[known_peer::days-1]));
 	peer->second.received_content(bytes);
 	total_received_ += bytes;
-	max_credited_ = std::max(max_credited_, peer->second.get_credited(boost::posix_time::second_clock::universal_time(), average_bytes_sent_per_day()));
+	max_credited_ = std::max(max_credited_,
+	                         peer->second.get_credited(boost::posix_time::second_clock::universal_time(),
+	                                                   average_bytes_sent_per_day()));
 }
 
-/*
-std::pair<known_peers::derived_t::iterator, known_peers::persistent_t::iterator> known_peers::get_record(const network_key& id)
-{
-	std::pair<derived_t::iterator, bool> total = derived_.insert(std::make_pair(id, derived_data()));
-	persistent_t::iterator history;
-
-	if (total.second) {
-		total.first->second.rollover = boost::posix_time::second_clock::universal_time().time_of_day();
-		total.first->second.total_sent = 0;
-		total.first->second.total_received = 0;
-
-		history = persistent_.insert(std::make_pair(id, persistent_data(total.first->second.rollover))).first;
-	}
-	else {
-		history = persistent_.find(id);
-	}
-
-	return std::make_pair(total.first, history);
-}
-*/
 known_peers::peers_t::iterator known_peers::transfered_content(network_key id, std::size_t bytes, unsigned data_offset)
 {
 	Dbt key(&id, sizeof(network_key));
@@ -257,9 +254,11 @@ known_peers::peers_t::iterator known_peers::new_peer(network_key id)
 
 void known_peers::rollover(const boost::system::error_code& error)
 {
+	using namespace boost::posix_time;
+
 	if (!error) {
-		boost::posix_time::ptime now = boost::posix_time::second_clock::universal_time();
-		boost::posix_time::ptime next_rollover(boost::date_time::max_date_time);
+		ptime now = second_clock::universal_time();
+		ptime next_rollover(boost::date_time::max_date_time);
 		boost::uint64_t bytes_per_day = average_bytes_sent_per_day();
 
 		for (peers_t::iterator peer = peers_.begin(); peer != peers_.end(); ++peer) {
@@ -284,7 +283,7 @@ void known_peers::rollover(const boost::system::error_code& error)
 
 				peer->second.do_rollover(&peer_data, now, bytes_per_day);
 
-				next_rollover = std::min(next_rollover, peer_data.rollover + boost::posix_time::hours(24));
+				next_rollover = std::min(next_rollover, peer_data.rollover + hours(24));
 
 				db_.put(NULL, &key, &data, 0);
 

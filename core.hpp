@@ -61,20 +61,6 @@ enum defined_protocols
 
 class network_key;
 
-/*
-class payload_buffer
-{
-public:
-	virtual mutable_buffer get() = 0;
-	virtual const_buffer get() const = 0;
-	virtual ~payload_buffer() {}
-};
-
-
-typedef boost::shared_ptr<payload_buffer> payload_buffer_ptr;
-typedef boost::shared_ptr<const payload_buffer> const_payload_buffer_ptr;
-*/
-
 class content_frame
 {
 public:
@@ -115,7 +101,9 @@ private:
 class sub_buffer : public const_shared_buffer
 {
 public:
-	sub_buffer(const_payload_buffer_ptr payload, const_buffer sub_buf) : payload_(payload), sub_buffer_(sub_buf) {}
+	sub_buffer(const_payload_buffer_ptr payload, const_buffer sub_buf)
+		: payload_(payload), sub_buffer_(sub_buf)
+	{}
 
 	virtual const_buffer get() const { return sub_buffer_; }
 
@@ -130,7 +118,12 @@ extern const network_key key_min;
 class rolling_stats
 {
 public:
-	rolling_stats() : mean_(0.0), var_(0.0), stddev_(0.0), count_(0) {}
+	rolling_stats()
+		: mean_(0.0)
+		, var_(0.0)
+		, stddev_(0.0)
+		, count_(0)
+	{}
 
 	void add(double new_val)
 	{
@@ -143,27 +136,27 @@ public:
 
 	void remove(double old_val)
 	{
-        --count_;
+		--count_;
 		if (count_ == 0) {
-            mean_ = 0;
-            var_ = 0;
-            stddev_ = 0;
+			mean_ = 0;
+			var_ = 0;
+			stddev_ = 0;
 		}
 		else {
-            double delta = old_val - mean_;
-            mean_ = mean_ - delta / count_;
-            var_ = ((count_+1)*var_ - delta*(old_val - mean_)) / count_;
+			double delta = old_val - mean_;
+			mean_ = mean_ - delta / count_;
+			var_ = ((count_+1)*var_ - delta*(old_val - mean_)) / count_;
 			stddev_ = std::sqrt(var_);
 		}
 	}
 
 	void update(double old_val, double new_val)
 	{
-        double newdelta = new_val - mean_;
-        double olddelta = old_val - mean_;
-        double oldmean = mean_ - olddelta / count_;
-        mean_ = oldmean + newdelta / count_;
-        var_ = (count_*var_ - olddelta*(old_val - oldmean) + newdelta * (new_val - mean_)) / count_;
+		double newdelta = new_val - mean_;
+		double olddelta = old_val - mean_;
+		double oldmean = mean_ - olddelta / count_;
+		mean_ = oldmean + newdelta / count_;
+		var_ = (count_*var_ - olddelta*(old_val - oldmean) + newdelta * (new_val - mean_)) / count_;
 		stddev_ = std::sqrt(var_);
 	}
 

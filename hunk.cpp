@@ -117,7 +117,10 @@ void content_store::load_contents(boost::filesystem::path dir_path, protocol_id 
 
 void content_store::do_flush(stored_content& stored)
 {
-	boost::posix_time::ptime now = boost::posix_time::second_clock::universal_time();
+	using namespace boost::posix_time;
+	using namespace boost::gregorian;
+
+	boost::posix_time::ptime now = second_clock::universal_time();
 	if (now - stored.desc->last_access > flush_threashold) {
 		std::vector<boost::uint8_t> key_buf;
 		generate_db_key(stored.desc->id, key_buf);
@@ -126,7 +129,7 @@ void content_store::do_flush(stored_content& stored)
 #ifdef BOOST_WINDOWS
 		HANDLE file_hnd = ::CreateFileA(path.c_str(), FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 		LARGE_INTEGER access_i;
-		access_i.QuadPart = (stored.desc->last_access - boost::posix_time::ptime(boost::gregorian::date(1601, boost::gregorian::Jan, 01))).total_microseconds();
+		access_i.QuadPart = (stored.desc->last_access - ptime(date(1601, Jan, 01))).total_microseconds();
 		access_i.QuadPart *= 10;
 		FILETIME last_access;
 		last_access.dwLowDateTime = access_i.LowPart;

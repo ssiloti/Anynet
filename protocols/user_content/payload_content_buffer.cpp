@@ -31,14 +31,22 @@
 //
 // Contact:  Steven Siloti <ssiloti@gmail.com>
 
-#include "key.hpp"
-#include "core.hpp"
+#include "payload_content_buffer.hpp"
+#include <payload_sources.hpp>
+#include <boost/make_shared.hpp>
 
-const static unsigned char max_key_value_[network_key::packed_size] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-                                                                       0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-const network_key key_max(max_key_value_);
+using namespace user_content;
 
-const static unsigned char min_key_value_[network_key::packed_size] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                                                                       0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-const network_key key_min(max_key_value_);
-
+void payload_content_buffer::trim(boost::shared_ptr<packet> pkt, std::size_t threshold) const
+{
+	const_buffer buf = payload->get();
+	if (buffer_size(buf) > threshold) {
+		content_sources::ptr_t self_source(new content_sources(buffer_size(buf)));
+		self_source->sources.insert(std::make_pair(node_.id(), content_sources::source(node_.public_endpoint())));
+		pkt->content_status(packet::content_detached);
+		if (node_.is_v4())
+			pkt->payload(boost::make_shared<payload_content_sources_v4>(self_source));
+		else
+			pkt->payload(boost::make_shared<payload_content_sources_v6>(self_source));
+	}
+}

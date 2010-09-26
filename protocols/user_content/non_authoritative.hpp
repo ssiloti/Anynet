@@ -36,10 +36,10 @@
 
 #include <glog/logging.h>
 
-#include "hunk.hpp"
 #include "content_protocol.hpp"
-#include "key.hpp"
-#include "node.hpp"
+#include <hunk.hpp>
+#include <key.hpp>
+#include <node.hpp>
 #include <boost/smart_ptr.hpp>
 #include <map>
 
@@ -68,12 +68,7 @@ public:
 		mapped_content::ptr backing;
 	};
 
-	static void create(local_node& node)
-	{
-		boost::shared_ptr<non_authoritative> ptr(new non_authoritative(node));
-		ptr->register_handler();
-		ptr->start_vacume();
-	}
+	static void create(local_node& node);
 
 	insert_buffer get_insertion_buffer(std::size_t size);
 	content_identifier insert_hunk(insert_buffer hunk);

@@ -35,6 +35,13 @@
 
 using namespace user_content;
 
+std::pair<std::size_t, std::size_t> framented_content::next_invalid_range()
+{
+	if (invalid_.empty())
+		return std::make_pair(0, 0);
+	return std::make_pair(invalid_.front().offset, invalid_.front().size);
+}
+
 framented_content::fragment_buffer framented_content::get_fragment_buffer(std::size_t offset, std::size_t size)
 {
 	// for now we will only allow one sequential receipt

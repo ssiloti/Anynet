@@ -59,15 +59,16 @@ class protocol_frame : public content_frame
 public:
 	typedef boost::shared_ptr<protocol_frame> ptr_t;
 
+	virtual bool done(std::size_t bytes_transfered) = 0;
+	virtual void send_failure(local_node& node, const network_key& dest) = 0;
+
+protected:
 	struct packed_header
 	{
 		boost::uint8_t frame_type;
 		boost::uint8_t rsvd;
 		boost::uint8_t protocol[2];
 	};
-
-	virtual bool done(std::size_t bytes_transfered) = 0;
-	virtual void send_failure(local_node& node, const network_key& dest) = 0;
 };
 
 class connection : public boost::enable_shared_from_this<connection>, boost::noncopyable
@@ -109,15 +110,23 @@ public:
 		frame_bit_successor            = 0x4,
 	};
 
-	const network_key& remote_id() const { return remote_identity_; }
+	const network_key& remote_id() const      { return remote_identity_; }
 	ip::tcp::endpoint remote_endpoint() const;
 	ip::address reported_node_address() const { return reported_peer_address_; }
-	std::size_t oob_threshold() const { return oob_threshold_; }
-	bool accepts_ib_traffic() const { return routing_type_ & 0x01; }
-	bool is_connected() const { return lifecycle_ == connected; }
-	boost::posix_time::time_duration age() { return boost::posix_time::second_clock::universal_time() - established_; }
-	bool is_transfer_outstanding() const { return receive_outstanding_ || outstanding_non_packet_frames_ || !packet_queue_.empty() || !frame_queue_.empty(); }
-	bool supports_protocol(protocol_id p) { return std::find(supported_protocols_.begin(), supported_protocols_.end(), p) != supported_protocols_.end(); }
+	std::size_t oob_threshold() const         { return oob_threshold_; }
+	bool accepts_ib_traffic() const           { return routing_type_ & 0x01; }
+	bool is_connected() const                 { return lifecycle_ == connected; }
+	boost::posix_time::time_duration age()    { return boost::posix_time::second_clock::universal_time() - established_; }
+
+	bool is_transfer_outstanding() const
+	{
+		return receive_outstanding_ || outstanding_non_packet_frames_ || !packet_queue_.empty() || !frame_queue_.empty();
+	}
+
+	bool supports_protocol(protocol_id p)
+	{
+		return std::find(supported_protocols_.begin(), supported_protocols_.end(), p) != supported_protocols_.end();
+	}
 
 	void send_reverse_successor()
 	{
@@ -153,6 +162,7 @@ public:
 			                                    payload_size,
 			                                    placeholders::error,
 			                                    placeholders::bytes_transferred));
+			// TODO: Understand why this was ever put here?
 		//	link_.consume_receive_buffer(link_.valid_received_bytes());
 		}
 		else {
@@ -216,17 +226,7 @@ public:
 #endif
 
 	static ptr_t connect(local_node& node, ip::tcp::endpoint peer, routing_type rtype);
-
-	static void accept(local_node& node, ip::tcp::acceptor& incoming)
-	{
-		ptr_t con(new connection(node, ib));
-		con->starting_connection();
-		incoming.async_accept( con->link_.socket.lowest_layer(),
-		                       boost::bind(&connection::connection_accepted,
-		                                   con,
-		                                   placeholders::error,
-		                                   boost::ref(incoming)) );
-	}
+	static void accept(local_node& node, ip::tcp::acceptor& incoming);
 
 private:
 	

@@ -31,18 +31,19 @@
 //
 // Contact:  Steven Siloti <ssiloti@gmail.com>
 
-#include "protocols/user_content/non_authoritative.hpp"
-#include "protocols/indirect_credit.hpp"
 #include "traffic_generator.hpp"
 #include "simulator.hpp"
-#include "peer_cache.hpp"
+#include <protocols/user_content/non_authoritative.hpp>
+#include <protocols/indirect_credit.hpp>
+#include <peer_cache.hpp>
 #include <boost/bind/protect.hpp>
 
 traffic_generator::traffic_generator(boost::asio::io_service& io_service, int id)
-	: config_(id), node_(io_service, config_),
-	  next_non_authoritative_insert_(sim.insert_non_authoritative_interval()),
-	  next_non_authoritative_get_(sim.get_non_authoritative_interval()),
-	  death_(sim.node_lifetime())
+	: config_(id)
+	, node_(io_service, config_)
+	, next_non_authoritative_insert_(sim.insert_non_authoritative_interval())
+	, next_non_authoritative_get_(sim.get_non_authoritative_interval())
+	, death_(sim.node_lifetime())
 {
 	peer_cache.add_peer(ip::tcp::endpoint(ip::address::from_string("127.0.0.1"), config_.listen_port()));
 	non_authoritative::create(node_);

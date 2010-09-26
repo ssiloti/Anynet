@@ -38,14 +38,17 @@
 #include <boost/bind.hpp>
 #include <cstring>
 
-struct packed_header
+namespace
 {
-	boost::uint8_t frame_type;
-	boost::uint8_t status;
-	boost::uint8_t protocol[2];
-	boost::uint8_t destination[network_key::packed_size];
-	boost::uint8_t payload_size[8];
-};
+	struct packed_header
+	{
+		boost::uint8_t frame_type;
+		boost::uint8_t status;
+		boost::uint8_t protocol[2];
+		boost::uint8_t destination[network_key::packed_size];
+		boost::uint8_t payload_size[8];
+	};
+}
 
 std::size_t packet::header_size()
 {
@@ -91,7 +94,8 @@ std::vector<const_buffer> packet::serialize(std::size_t threshold, mutable_buffe
 	packed_header* h = buffer_cast<packed_header*>(scratch);
 
 	if (payload_.get() != NULL) {
-		const std::vector<const_buffer>& payload_buffers = payload_->serialize(shared_from_this(), threshold, scratch + buffer_size(buffers.back()));
+		const std::vector<const_buffer>&
+			payload_buffers = payload_->serialize(shared_from_this(), threshold, scratch + buffer_size(buffers.back()));
 
 		for (std::vector<const_buffer>::const_iterator pbuf = payload_buffers.begin(); pbuf != payload_buffers.end(); ++pbuf)
 			payload_size += buffer_size(*pbuf);

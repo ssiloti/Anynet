@@ -84,7 +84,10 @@ public:
 	typedef boost::asio::ssl::stream<ip::tcp::socket> socket_t;
 
 	net_link(boost::asio::io_service& io_service, boost::asio::ssl::context& ctx)
-		: socket(io_service, ctx), valid_receive_bytes_(0), valid_send_bytes_(0), send_buffer_(sr_buffer_size)
+		: socket(io_service, ctx)
+		, valid_receive_bytes_(0)
+		, valid_send_bytes_(0)
+		, send_buffer_(sr_buffer_size)
 	{}
 
 	mutable_buffer receive_buffer(std::size_t size = 0)

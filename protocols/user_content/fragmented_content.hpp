@@ -35,7 +35,7 @@
 #define FRAGMENTED_CONTENT_HPP
 
 #include "user_content_fwd.hpp"
-#include "core.hpp"
+#include <core.hpp>
 #include <list>
 
 namespace user_content
@@ -52,12 +52,21 @@ public:
 		const std::size_t offset;
 		const mutable_buffer buf;
 		const payload_buffer_ptr content;
-		fragment_buffer(std::size_t o = 0, std::size_t s = 0, payload_buffer_ptr c = payload_buffer_ptr()) : content(c), offset(o), buf(buffer(c->get() + o, s)) {}
+
+		fragment_buffer(std::size_t o = 0, std::size_t s = 0, payload_buffer_ptr c = payload_buffer_ptr())
+			: content(c)
+			, offset(o)
+			, buf(buffer(c->get() + o, s))
+		{}
 	};
 
-	framented_content(payload_buffer_ptr c) : content_(c) { invalid_.push_back(fragment(0, buffer_size(c->get()), ip::address(), fragment::invalid)); }
+	framented_content(payload_buffer_ptr c)
+		: content_(c)
+	{
+		invalid_.push_back(fragment(0, buffer_size(c->get()), ip::address(), fragment::invalid));
+	}
 
-	std::pair<std::size_t, std::size_t> next_invalid_range() { if (invalid_.empty()) return std::make_pair(0, 0); return std::make_pair(invalid_.front().offset, invalid_.front().size); }
+	std::pair<std::size_t, std::size_t> next_invalid_range();
 	fragment_buffer get_fragment_buffer(std::size_t offset, std::size_t size);
 	void mark_valid(boost::shared_ptr<frame_fragment> frag, ip::address source);
 	const_payload_buffer_ptr complete();
@@ -73,8 +82,15 @@ private:
 			receiving,
 			valid,
 		};
-		fragment(std::size_t o, std::size_t s, ip::address src, fragment_state st) : offset(o), size(s), source(src), state(st) {}
-		std::size_t offset,size;
+
+		fragment(std::size_t o, std::size_t s, ip::address src, fragment_state st)
+			: offset(o)
+			, size(s)
+			, source(src)
+			, state(st)
+		{}
+
+		std::size_t offset, size;
 		fragment_state state;
 		ip::address source;
 	};

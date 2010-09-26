@@ -31,7 +31,10 @@
 //
 // Contact:  Steven Siloti <ssiloti@gmail.com>
 
-#include <protocol.hpp>
+#include "protocol.hpp"
+#include "payload_sources.hpp"
+#include "payload_request.hpp"
+#include "payload_failure.hpp"
 #include "node.hpp"
 #include <boost/bind/protect.hpp>
 
@@ -41,18 +44,11 @@
 
 const boost::posix_time::time_duration network_protocol::min_successor_source_age = boost::posix_time::hours(1);
 
-sendable_payload::ptr_t content_sources::get_payload()
-{
-	if (sources.empty())
-		return sendable_payload::ptr_t();
-	else if (sources.begin()->second.ep.address().is_v4())
-		return boost::make_shared<payload_content_sources_v4>(shared_from_this());
-	else
-		return boost::make_shared<payload_content_sources_v6>(shared_from_this());
-}
-
 network_protocol::network_protocol(local_node& node, protocol_id p)
-	: node_(node), shutting_down_(false), vacume_sources_(node.io_service()), protocol_(p)
+	: node_(node)
+	, shutting_down_(false)
+	, vacume_sources_(node.io_service())
+	, protocol_(p)
 {
 	node_id = node.id();
 }
@@ -82,6 +78,16 @@ void network_protocol::receive_payload(connection::ptr_t con, packet::ptr_t pkt,
 	}
 }
 
+void network_protocol::to_content_location_failure(packet::ptr_t pkt)
+{
+	pkt->to_reply(packet::content_failure, boost::make_shared<const payload_failure>(pkt->payload_as<payload_request>()->size));
+}
+
+void network_protocol::request_from_location_failure(packet::ptr_t pkt)
+{
+	pkt->to_reply(packet::content_requested, boost::make_shared<const payload_request>(pkt->payload_as<payload_failure>()->size));
+}
+
 void network_protocol::register_handler()
 {
 	node_.register_protocol_handler(id(), shared_from_this());
@@ -102,7 +108,9 @@ void network_protocol::snoop_packet(packet::ptr_t pkt)
 	snoop_packet_payload(pkt);
 
 	if (pkt->content_status() == packet::content_requested) {
-		std::pair<content_requests_t::iterator, bool> recent = recent_requests_.insert(std::make_pair(pkt->content_id(), boost::array<boost::posix_time::ptime, 2>()));
+		std::pair<content_requests_t::iterator, bool>
+			recent = recent_requests_.insert(std::make_pair(pkt->content_id(),
+			                                 boost::array<boost::posix_time::ptime, 2>()));
 
 		recent.first->second[1] = recent.first->second[0];
 		recent.first->second[0] = boost::posix_time::second_clock::universal_time();
@@ -121,11 +129,17 @@ void network_protocol::drop_crumb(packet::ptr_t pkt, boost::weak_ptr<connection>
 	std::pair<crumbs_t::iterator, bool> crumb_entry = crumbs_.insert(std::make_pair(pkt->content_id(), boost::shared_ptr<crumb>()));
 	if (crumb_entry.second) {
 		crumb_entry.first->second.reset(new crumb(node_.io_service()));
-		crumb_entry.first->second->timeout.async_wait(boost::bind(&network_protocol::pickup_crumb, shared_from_this(), pkt->content_id(), placeholders::error));
+		crumb_entry.first->second->timeout.async_wait(boost::bind(&network_protocol::pickup_crumb,
+		                                                          shared_from_this(),
+		                                                          pkt->content_id(),
+		                                                          placeholders::error));
 	}
 
-	std::pair<crumb::requesters_t::iterator, bool> requester_entry = crumb_entry.first->second->requesters.insert(std::make_pair(pkt->requester(), con));
-	requester_entry.first->second = con; // even if there already was an entry for this requester, update the connection pointer to point to the most recent request
+	std::pair<crumb::requesters_t::iterator, bool>
+		requester_entry = crumb_entry.first->second->requesters.insert(std::make_pair(pkt->requester(), con));
+	// even if there already was an entry for this requester,
+	// update the connection pointer to point to the most recent request
+	requester_entry.first->second = con;
 
 	DLOG(INFO) << std::string(node_.id()) << " Dropping crmumb id "
 	           << std::string(pkt->content_id().publisher) << ", " << std::string(pkt->requester()) << " source " << std::string(con.lock()->remote_id());
@@ -205,7 +219,10 @@ void network_protocol::vacume_sources(const boost::system::error_code& error)
 
 		for (content_sources_t::iterator content = content_sources_.begin(); content != content_sources_.end();) {
 			bool successor = node_.closer_peers(content->first.publisher) == 0;
-			for (content_sources::sources_t::iterator source = content->second->sources.begin(); source != content->second->sources.end();) {
+			for (content_sources::sources_t::iterator source = content->second->sources.begin()
+				; source != content->second->sources.end()
+				;)
+			{
 				boost::posix_time::time_duration age = now - source->second.stored;
 				if ( (age < age_cap) || (successor && age < min_successor_source_age) || source->second.active_request_count ) {
 					++source;

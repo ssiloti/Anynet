@@ -31,14 +31,55 @@
 //
 // Contact:  Steven Siloti <ssiloti@gmail.com>
 
+#ifndef CONTENT_SOURCES_HPP
+#define CONTENT_SOURCES_HPP
+
+#include "packet.hpp"
 #include "key.hpp"
-#include "core.hpp"
+#include <boost/date_time/posix_time/posix_time_types.hpp>
+#include <boost/enable_shared_from_this.hpp>
 
-const static unsigned char max_key_value_[network_key::packed_size] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-                                                                       0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-const network_key key_max(max_key_value_);
+struct content_sources : public boost::enable_shared_from_this<content_sources>
+{
+	typedef boost::shared_ptr<content_sources> ptr_t;
 
-const static unsigned char min_key_value_[network_key::packed_size] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                                                                       0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-const network_key key_min(max_key_value_);
+	struct source
+	{
+		source()
+			: stored(boost::posix_time::second_clock::universal_time())
+			, active_request_count(0)
+		{}
 
+		source(ip::tcp::endpoint ep)
+			: stored(boost::posix_time::second_clock::universal_time())
+			, ep(ep)
+		{}
+
+		boost::posix_time::ptime stored;
+		ip::tcp::endpoint ep;
+		unsigned int active_request_count;
+	};
+
+	struct ep_cmp
+	{
+		bool operator()(const ip::tcp::endpoint& l, const ip::tcp::endpoint& r) const
+		{
+			if (l.address() == r.address())
+				return l.port() < r.port();
+			else
+				return l.address() < r.address();
+		}
+	};
+
+	typedef std::map<network_key, source> sources_t;
+
+	content_sources(content_size_t s) : size(s), last_stat_source_count(0) {}
+
+	sendable_payload::ptr_t get_payload();
+
+	sources_t sources;
+	content_size_t size;
+	int last_stat_source_count; // the most recent source count which was registered with the sources_per_hunk stats
+};
+
+#endif

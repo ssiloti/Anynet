@@ -57,23 +57,17 @@ class known_peers
 
 		explicit known_peer(packed* data);
 
-		known_peer() : pubkey_(NULL), total_sent_(0), total_received_(0)
+		known_peer()
+			: pubkey_(NULL), total_sent_(0), total_received_(0)
 		{
 
 		}
 
-		void sent_content(std::size_t bytes) { total_sent_ += bytes; sent_today_ += bytes; }
+		void sent_content(std::size_t bytes)     { total_sent_ += bytes; sent_today_ += bytes; }
 		void received_content(std::size_t bytes) { total_received_ += bytes; received_today_ += bytes; }
 
-		boost::uint64_t total_sent()
-		{
-			return total_sent_;
-		}
-
-		boost::uint64_t total_received()
-		{
-			return total_received_;
-		}
+		boost::uint64_t total_sent()             { return total_sent_; }
+		boost::uint64_t total_received()         { return total_received_; }
 
 		boost::posix_time::ptime get_credited(boost::posix_time::ptime now, boost::uint64_t average_bytes_sent_per_day) const
 		{
@@ -102,7 +96,9 @@ public:
 	struct credit_type
 	{
 		credit_type() {}
-		credit_type(network_key r, boost::posix_time::ptime e) : recipient(r), expires(e) {}
+		credit_type(network_key r, boost::posix_time::ptime e)
+			: recipient(r), expires(e)
+		{}
 
 		network_key recipient;
 		boost::posix_time::ptime expires;
@@ -127,7 +123,8 @@ public:
 
 		boost::posix_time::ptime expires()
 		{
-			return sorted_peers_.back()->second.get_credited(boost::posix_time::second_clock::universal_time(), peers_.average_bytes_sent_per_day());
+			return sorted_peers_.back()->second.get_credited(boost::posix_time::second_clock::universal_time(),
+			                                                 peers_.average_bytes_sent_per_day());
 		}
 
 		const_buffer signature(const_buffer packed_credit)
@@ -175,7 +172,6 @@ public:
 	}
 
 private:
-//	std::pair<derived_t::iterator, persistent_t::iterator> get_record(const network_key& id);
 	peers_t::iterator new_peer(network_key id);
 	peers_t::iterator transfered_content(network_key id, std::size_t bytes, unsigned data_offset);
 

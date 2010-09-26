@@ -33,19 +33,37 @@
 
 #include "simulator.hpp"
 #include "traffic_generator.hpp"
-#include "protocols/user_content/non_authoritative.hpp"
-#include "node.hpp"
+#include <protocols/user_content/non_authoritative.hpp>
+#include <node.hpp>
 #include <boost/smart_ptr.hpp>
 #include <vector>
 
 const static int target_node_count = 10;
 
-network_simulator::network_simulator() : node_lifetime_(rng_, boost::lognormal_distribution<>(600, 200)),
-	  insert_non_authoritative_interval_(rng_, boost::lognormal_distribution<>(200, 10)),
-	  get_non_authoritative_interval_(rng_, boost::lognormal_distribution<>(10, 1)),
-	  time_(0), outstanding_queries(0), tick_timer_(io_service)
+network_simulator::network_simulator()
+	: node_lifetime_(rng_, boost::lognormal_distribution<>(600, 200))
+	, insert_non_authoritative_interval_(rng_, boost::lognormal_distribution<>(200, 10))
+	, get_non_authoritative_interval_(rng_, boost::lognormal_distribution<>(10, 1))
+	, time_(0)
+	, outstanding_queries(0)
+	, tick_timer_(io_service)
 {
 	tick(boost::system::error_code());
+}
+
+network_key network_simulator::get_non_authoritative()
+{
+	if (non_authoritative_hunks_.active.size()) {
+		std::map<network_key, hunk_stats>::iterator hunk = non_authoritative_hunks_.active.begin();
+		double idx = boost::variate_generator<boost::mt19937&, boost::uniform_real<> >
+			( rng_, boost::uniform_real<>(0.0, std::pow(non_authoritative_hunks_.active.size() - 1, 2.0)) )();
+		int index(int(std::floor(std::sqrt(idx) + 0.5)));
+		while (index--) ++hunk;
+		assert(!node_created(hunk->first));
+		return hunk->first;
+	}
+	else
+		return key_max;
 }
 
 void network_simulator::stored_non_authoritative_hunk(network_key id)
@@ -68,13 +86,19 @@ void network_simulator::tick(const boost::system::error_code& error)
 			clients.push_back(boost::shared_ptr<traffic_generator>(new traffic_generator(io_service, clients.size())));
 		}
 		else {
-			for (std::vector<boost::shared_ptr<traffic_generator> >::iterator client = clients.begin(); client != clients.end(); ++client) {
+			for (std::vector<boost::shared_ptr<traffic_generator> >::iterator client = clients.begin()
+				; client != clients.end()
+				; ++client)
+			{
 				if (!*client)
 					client->reset(new traffic_generator(io_service, std::distance(clients.begin(), client)));
 				(*client)->tick(time_);
 			}
 
-			for (std::vector<network_key>::iterator it = non_authoritative_hunks_.queue.begin(); it != non_authoritative_hunks_.queue.end(); ++it) {
+			for (std::vector<network_key>::iterator it = non_authoritative_hunks_.queue.begin()
+				; it != non_authoritative_hunks_.queue.end()
+				; ++it)
+			{
 				non_authoritative_hunks_.active.insert(std::make_pair(*it, hunk_stats()));
 			}
 
@@ -83,12 +107,16 @@ void network_simulator::tick(const boost::system::error_code& error)
 			++time_;
 		}
 
-		for (std::vector<std::vector<boost::shared_ptr<traffic_generator> >::iterator>::iterator it = client_hitlist_.begin(); it != client_hitlist_.end(); ++it) {
+		for (std::vector<std::vector<boost::shared_ptr<traffic_generator> >::iterator>::iterator it = client_hitlist_.begin()
+			; it != client_hitlist_.end()
+			; ++it)
+		{
 			(*it)->reset();
 		}
 
 		client_hitlist_.clear();
 	}
+
 	tick_timer_.expires_from_now(boost::posix_time::milliseconds(200));
 	tick_timer_.async_wait(boost::bind(&network_simulator::tick, this, placeholders::error));
 	google::FlushLogFiles(google::INFO);

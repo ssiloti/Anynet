@@ -62,7 +62,9 @@ public:
 	}
 
 	virtual void trim(boost::shared_ptr<packet> pkt, std::size_t threshold) const {}
-	virtual std::vector<const_buffer> serialize(boost::shared_ptr<const packet> pkt, std::size_t threshold, mutable_buffer scratch) const = 0;
+	virtual std::vector<const_buffer> serialize(boost::shared_ptr<const packet> pkt,
+	                                            std::size_t threshold,
+	                                            mutable_buffer scratch) const = 0;
 	virtual ~sendable_payload() {}
 };
 
@@ -99,11 +101,11 @@ public:
 	void receive(net_link& link, Handler handler)
 	{
 		link.make_valid(header_size(), boost::bind(&packet::header_received<Handler>,
-			                                       shared_from_this(),
-			                                       boost::ref(link),
-			                                       handler,
-			                                       placeholders::error,
-			                                       placeholders::bytes_transferred));
+		                                           shared_from_this(),
+		                                           boost::ref(link),
+		                                           handler,
+		                                           placeholders::error,
+		                                           placeholders::bytes_transferred));
 	}
 
 	protocol_id protocol() const { return sig_scheme_; }
@@ -118,7 +120,7 @@ public:
 	const network_key& destination() const { return destination_; };
 	void destination(const network_key& d) { destination_ = d; }
 
-	content_name& name() { return name_; }
+	content_name& name()             { return name_; }
 	const content_name& name() const { return name_; }
 	void name(const content_name& n) { name_ = n; }
 
@@ -143,7 +145,7 @@ public:
 		return content_identifier(publisher(), name());
 	}
 
-	void mark_direct() { direct_ = true; }
+	void mark_direct()     { direct_ = true; }
 	bool is_direct() const { return direct_; }
 
 	const sendable_payload* payload() const { return payload_.get(); }

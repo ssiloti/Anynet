@@ -31,28 +31,165 @@
 //
 // Contact:  Steven Siloti <ssiloti@gmail.com>
 
-#include "protocols/indirect_credit.hpp"
-#include "node.hpp"
+#include "indirect_credit.hpp"
+#include <payload_failure.hpp>
+#include <payload_request.hpp>
+#include <node.hpp>
 #include <boost/bind/protect.hpp>
 #include <boost/bind.hpp>
 #include <boost/make_shared.hpp>
 #include <stdexcept>
 
-struct stored_single_credit
+namespace
 {
-//	network_key recipient;
-	boost::posix_time::ptime expires;
-	boost::uint16_t signature_length;
-//	boost::uint16_t issuer_length;
-//	boost::uint8_t signature[1];
-};
+	struct stored_single_credit
+	{
+	//	network_key recipient;
+		boost::posix_time::ptime expires;
+		boost::uint16_t signature_length;
+	//	boost::uint16_t issuer_length;
+	//	boost::uint8_t signature[1];
+	};
+
+	template <typename Store>
+	class payload_credits : public sendable_payload
+	{
+	public:
+		typedef Store store_type;
+
+		virtual std::vector<const_buffer> serialize(boost::shared_ptr<const packet> pkt, std::size_t threshold, mutable_buffer scratch) const
+		{
+			boost::uint8_t* scratch_base = buffer_cast<boost::uint8_t*>(scratch);
+
+			const authority& issuer = store_.get_creditor(pkt->source());
+			unsigned issuer_size = issuer.serialize();
+
+			if (issuer_size > buffer_size(scratch) + 3)
+				throw std::length_error("scratch buffer is too small for credit issuer, this shouldn't happen");
+
+			u16(buffer_cast<boost::uint8_t*>(scratch), boost::uint16_t(issuer_size));
+			scratch = scratch + 2;
+
+			issuer.serialize(scratch);
+			scratch = scratch + issuer_size;
+
+			boost::uint8_t* credit_count = buffer_cast<boost::uint8_t*>(scratch);
+			scratch = scratch + 1;
+
+			typename store_type::iterator credit_iter = store_.begin(pkt->source(), pkt->destination());
+
+			while (credit_iter != store_.end()) {
+			//	const typename store_type::credit_type& credit = *credit_iter;
+				//const_buffer signature(credit.signature.get());
+				if (buffer_size(scratch) < sizeof(packed_single_credit))
+					break;
+
+				packed_single_credit* packed_credit = buffer_cast<packed_single_credit*>(scratch);
+				credit_iter.recipient().encode(packed_credit->recipient);
+				u64(packed_credit->expires, (credit_iter.expires() - epoch).total_seconds());
+
+				const_buffer sig(credit_iter.signature(const_buffer(packed_credit, sizeof(packed_credit->recipient) + sizeof(packed_credit->expires))));
+
+				if (buffer_size(scratch) < buffer_size(sig))
+					break;
+
+				u16(packed_credit->signature_size, buffer_size(sig));
+				std::memcpy(packed_credit->signature, buffer_cast<const void*>(sig), buffer_size(sig));
+
+				scratch = scratch + sizeof(packed_single_credit) + buffer_size(sig);
+				++*credit_count;
+				++credit_iter;
+			}
+
+			return std::vector<const_buffer>(1, const_buffer(scratch_base, buffer_cast<boost::uint8_t*>(scratch) - scratch_base));
+		}
+
+		static std::size_t parse(packet::ptr_t pkt, const_buffer buf, store_type& store)
+		{
+			std::size_t input_size = buffer_size(buf);
+
+			if (input_size < 2)
+				return 0;
+
+			std::size_t issuer_size = u16(buffer_cast<const boost::uint8_t*>(buf));
+
+			if (input_size < 2 + issuer_size)
+				return 0;
+
+			buf = buf + 2;
+
+			authority issuer(const_buffer(buffer_cast<const void*>(buf), issuer_size));
+
+			if (!issuer.valid())
+				return 0;
+
+			pkt->source(store.store_creditor(const_buffer(buffer_cast<const void*>(buf), issuer_size)));
+			buf = buf + issuer_size;
+
+			if (buffer_size(buf) < 1)
+				return 0;
+
+			int credit_count = *buffer_cast<const boost::uint8_t*>(buf);
+			buf = buf + 1;
+
+			pkt->payload(boost::make_shared<payload_credits<store_type> >(store));
+			//payload_credits<store_type>& credits = *pkt->payload_as<payload_credits<store_type> >();
+
+			for (;credit_count > 0; --credit_count) {
+				if (buffer_size(buf) < sizeof(packed_single_credit))
+					return 0;
+
+				const packed_single_credit* packed_credit = buffer_cast<const packed_single_credit*>(buf);
+
+				boost::uint64_t expires_seconds = u64(packed_credit->expires);
+				long expires_hours = long(expires_seconds / 3600);
+				expires_seconds %= 3600;
+				long expires_minutes = long(expires_seconds / 60);
+				expires_seconds %= 60;
+
+				typename store_type::credit_type
+					store_credit(network_key(packed_credit->recipient),
+					             epoch + boost::posix_time::time_duration(expires_hours, expires_minutes, long(expires_seconds)),
+					             const_buffer(buffer_cast<const void*>(buf), sizeof(packed_credit) - sizeof(packed_credit->signature_size)));
+
+				if (!store.store_credit(issuer,
+				                        pkt->source(),
+				                        store_credit,
+				                        const_buffer(buffer_cast<const void*>(buf + sizeof(packed_credit)), u16(packed_credit->signature_size))))
+					return 0;
+
+				buf = buf + sizeof(packed_credit) + u16(packed_credit->signature_size);
+			}
+
+			return input_size - buffer_size(buf);
+		}
+
+		payload_credits(const store_type& store) : store_(store) {}
+
+	private:
+		struct packed_single_credit
+		{
+			boost::uint8_t recipient[network_key::packed_size];
+			boost::uint8_t expires[8];
+			boost::uint8_t signature_size[2];
+			boost::uint8_t signature[];
+		};
+
+	/*	struct packet_credit_vector
+		{
+			boost::uint8_t credit_count;
+			boost::uint8_t issuer_size[2];
+		};*/
+
+		const store_type& store_;
+	};
+}
 
 const static boost::posix_time::ptime epoch(boost::gregorian::date(1970, boost::gregorian::Jan, 1));
 
 credit_store::iterator::iterator(const credit_store& store)
 	: store_(store)
-{
-}
+{}
 
 credit_store::iterator::iterator(const credit_store& store, const network_key& issuer, const network_key& target)
 	: store_(store), issuer_(issuer)
@@ -157,7 +294,9 @@ credit_store::credit_type credit_store::get_credit(const network_key& creditor, 
 		throw std::invalid_argument("Credit not found");
 
 	const stored_credit_data* credit_data = reinterpret_cast<const stored_credit_data*>(data.get_data());
-	return credit_type(recipient, credit_data->expires, const_buffer(credit_data->signature, credit_data->signature_size));
+	return credit_type(recipient,
+	                   credit_data->expires,
+	                   const_buffer(credit_data->signature, credit_data->signature_size));
 }
 
 network_key credit_store::store_creditor(const_buffer creditor)
@@ -211,139 +350,6 @@ bool credit_store::store_credit(const authority& creditor,
 
 	return true;
 }
-
-template <typename Store>
-class payload_credits : public sendable_payload
-{
-public:
-	typedef Store store_type;
-
-	virtual std::vector<const_buffer> serialize(boost::shared_ptr<const packet> pkt, std::size_t threshold, mutable_buffer scratch) const
-	{
-		boost::uint8_t* scratch_base = buffer_cast<boost::uint8_t*>(scratch);
-
-		const authority& issuer = store_.get_creditor(pkt->source());
-		unsigned issuer_size = issuer.serialize();
-
-		if (issuer_size > buffer_size(scratch) + 3)
-			throw std::length_error("scratch buffer is too small for credit issuer, this shouldn't happen");
-
-		u16(buffer_cast<boost::uint8_t*>(scratch), boost::uint16_t(issuer_size));
-		scratch = scratch + 2;
-
-		issuer.serialize(scratch);
-		scratch = scratch + issuer_size;
-
-		boost::uint8_t* credit_count = buffer_cast<boost::uint8_t*>(scratch);
-		scratch = scratch + 1;
-
-		typename store_type::iterator credit_iter = store_.begin(pkt->source(), pkt->destination());
-
-		while (credit_iter != store_.end()) {
-		//	const typename store_type::credit_type& credit = *credit_iter;
-			//const_buffer signature(credit.signature.get());
-			if (buffer_size(scratch) < sizeof(packed_single_credit))
-				break;
-
-			packed_single_credit* packed_credit = buffer_cast<packed_single_credit*>(scratch);
-			credit_iter.recipient().encode(packed_credit->recipient);
-			u64(packed_credit->expires, (credit_iter.expires() - epoch).total_seconds());
-
-			const_buffer sig(credit_iter.signature(const_buffer(packed_credit, sizeof(packed_credit->recipient) + sizeof(packed_credit->expires))));
-
-			if (buffer_size(scratch) < buffer_size(sig))
-				break;
-
-			u16(packed_credit->signature_size, buffer_size(sig));
-			std::memcpy(packed_credit->signature, buffer_cast<const void*>(sig), buffer_size(sig));
-
-			scratch = scratch + sizeof(packed_single_credit) + buffer_size(sig);
-			++*credit_count;
-			++credit_iter;
-		}
-
-		return std::vector<const_buffer>(1, const_buffer(scratch_base, buffer_cast<boost::uint8_t*>(scratch) - scratch_base));
-	}
-
-	static std::size_t parse(packet::ptr_t pkt, const_buffer buf, store_type& store)
-	{
-		std::size_t input_size = buffer_size(buf);
-
-		if (input_size < 2)
-			return 0;
-
-		std::size_t issuer_size = u16(buffer_cast<const boost::uint8_t*>(buf));
-
-		if (input_size < 2 + issuer_size)
-			return 0;
-
-		buf = buf + 2;
-
-		authority issuer(const_buffer(buffer_cast<const void*>(buf), issuer_size));
-
-		if (!issuer.valid())
-			return 0;
-
-		pkt->source(store.store_creditor(const_buffer(buffer_cast<const void*>(buf), issuer_size)));
-		buf = buf + issuer_size;
-
-		if (buffer_size(buf) < 1)
-			return 0;
-
-		int credit_count = *buffer_cast<const boost::uint8_t*>(buf);
-		buf = buf + 1;
-
-		pkt->payload(boost::make_shared<payload_credits<store_type> >(store));
-		//payload_credits<store_type>& credits = *pkt->payload_as<payload_credits<store_type> >();
-
-		for (;credit_count > 0; --credit_count) {
-			if (buffer_size(buf) < sizeof(packed_single_credit))
-				return 0;
-
-			const packed_single_credit* packed_credit = buffer_cast<const packed_single_credit*>(buf);
-
-			boost::uint64_t expires_seconds = u64(packed_credit->expires);
-			long expires_hours = long(expires_seconds / 3600);
-			expires_seconds %= 3600;
-			long expires_minutes = long(expires_seconds / 60);
-			expires_seconds %= 60;
-
-			typename store_type::credit_type
-				store_credit(network_key(packed_credit->recipient),
-				             epoch + boost::posix_time::time_duration(expires_hours, expires_minutes, long(expires_seconds)),
-				             const_buffer(buffer_cast<const void*>(buf), sizeof(packed_credit) - sizeof(packed_credit->signature_size)));
-
-			if (!store.store_credit(issuer,
-			                        pkt->source(),
-			                        store_credit,
-			                        const_buffer(buffer_cast<const void*>(buf + sizeof(packed_credit)), u16(packed_credit->signature_size))))
-				return 0;
-
-			buf = buf + sizeof(packed_credit) + u16(packed_credit->signature_size);
-		}
-
-		return input_size - buffer_size(buf);
-	}
-
-	payload_credits(const store_type& store) : store_(store) {}
-
-private:
-	struct packed_single_credit
-	{
-		boost::uint8_t recipient[network_key::packed_size];
-		boost::uint8_t expires[8];
-		boost::uint8_t signature_size[2];
-		boost::uint8_t signature[];
-	};
-
-/*	struct packet_credit_vector
-	{
-		boost::uint8_t credit_count;
-		boost::uint8_t issuer_size[2];
-	};*/
-
-	const store_type& store_;
-};
 
 indirect_credit::indirect_credit(local_node& node)
 	: network_protocol(node, protocol_id), store_(node.io_service(), node.config().content_store_path() + "/indirect_credits")

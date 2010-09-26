@@ -85,8 +85,12 @@
     <ClInclude Include="..\authority.hpp" />
     <ClInclude Include="..\connection.hpp" />
     <ClInclude Include="..\content.hpp" />
+    <ClInclude Include="..\content_sources.hpp" />
     <ClInclude Include="..\core.hpp" />
     <ClInclude Include="..\field_utils.hpp" />
+    <ClInclude Include="..\payload_failure.hpp" />
+    <ClInclude Include="..\payload_request.hpp" />
+    <ClInclude Include="..\payload_sources.hpp" />
     <ClInclude Include="..\protocols\user_content\fragment.hpp" />
     <ClInclude Include="..\hunk.hpp" />
     <ClInclude Include="..\key.hpp" />
@@ -111,6 +115,7 @@
   <ItemGroup>
     <ClCompile Include="..\authority.cpp" />
     <ClCompile Include="..\connection.cpp" />
+    <ClCompile Include="..\content_sources.cpp" />
     <ClCompile Include="..\core.cpp" />
     <ClCompile Include="..\protocols\user_content\fragment.cpp" />
     <ClCompile Include="..\hunk.cpp" />
@@ -122,6 +127,7 @@
     <ClCompile Include="..\peer_cache.cpp" />
     <ClCompile Include="..\protocol.cpp" />
     <ClCompile Include="..\protocols\indirect_credit.cpp" />
+    <ClCompile Include="..\protocols\user_content\payload_content_buffer.cpp" />
     <ClCompile Include="..\protocols\user_content\request.cpp" />
     <ClCompile Include="..\protocols\user_content\content_protocol.cpp" />
     <ClCompile Include="config.cpp" />

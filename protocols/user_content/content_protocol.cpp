@@ -34,7 +34,10 @@
 #include "fragment.hpp"
 #include "payload_content_buffer.hpp"
 #include "content_protocol.hpp"
-#include "node.hpp"
+#include <payload_sources.hpp>
+#include <payload_request.hpp>
+#include <payload_failure.hpp>
+#include <node.hpp>
 #include <boost/bind/protect.hpp>
 #include <boost/bind.hpp>
 #include <boost/make_shared.hpp>
@@ -86,10 +89,14 @@ void content_protocol::snoop_packet_payload(packet::ptr_t pkt)
 			pkt->source(cid.publisher);
 			pkt->name(cid.name);
 			if (pkt->is_direct()) {
-				hunk_desc = node_.cache_local_request(id(), pkt->source(), buffer_size(pkt->payload_as<payload_content_buffer>()->payload->get()));
+				hunk_desc = node_.cache_local_request(id(),
+				                                      pkt->source(),
+				                                      buffer_size(pkt->payload_as<payload_content_buffer>()->payload->get()));
 			}
 			else if (pkt->source() == pkt->destination())
-				hunk_desc = node_.cache_store(id(), pkt->source(), buffer_size(pkt->payload_as<payload_content_buffer>()->payload->get()));
+				hunk_desc = node_.cache_store(id(),
+				                              pkt->source(),
+				                              buffer_size(pkt->payload_as<payload_content_buffer>()->payload->get()));
 			else {
 				content_requests_t::iterator recent_request = recent_requests_.find(pkt->content_id());
 				if (recent_request == recent_requests_.end() || recent_request->second[1].is_not_a_date_time())
@@ -154,7 +161,6 @@ void content_protocol::snoop_packet_payload(packet::ptr_t pkt)
 
 		if (keyed_handler != response_handlers_.end()) {
 			if (keyed_handler->second->request.snoop_packet(node_, pkt)) {
-			//	keyed_handler->second->timeout.cancel();
 				response_handlers_.erase(keyed_handler);
 			}
 			else {
@@ -197,7 +203,6 @@ void content_protocol::snoop_fragment(const network_key& src, frame_fragment::pt
 				pkt->destination(node_.id());
 				pkt->payload(boost::make_shared<payload_failure>(0));
 				if (request->second->request.snoop_packet(node_, pkt)) {
-				//	request->second->timeout.cancel();
 					response_handlers_.erase(request);
 					return;
 				}
@@ -225,7 +230,9 @@ void content_protocol::receive_attached_content(connection::ptr_t con, packet::p
 {
 	payload_buffer_ptr payload_buffer(get_payload_buffer(payload_size));
 	pkt->payload(boost::make_shared<payload_content_buffer>(boost::ref(node_), payload_buffer));
-	con->receive_payload(std::vector<mutable_buffer>(1, payload_buffer->get()), boost::protect(boost::bind(&content_protocol::content_received, this, con, pkt)));
+	con->receive_payload(std::vector<mutable_buffer>(1,
+	                                                 payload_buffer->get()),
+	                                                 boost::protect(boost::bind(&content_protocol::content_received, this, con, pkt)));
 }
 
 void content_protocol::content_received(connection::ptr_t con, packet::ptr_t pkt)
@@ -272,9 +279,12 @@ framented_content::fragment_buffer content_protocol::get_fragment_buffer(frame_f
 		return framented_content::fragment_buffer(frag->offset());
 }
 
-void content_protocol::new_content_request(const content_identifier& key, content_size_t content_size, const content_request::keyed_handler_t& handler)
+void content_protocol::new_content_request(const content_identifier& key,
+                                           content_size_t content_size,
+                                           const content_request::keyed_handler_t& handler)
 {
-	std::pair<response_handlers_t::iterator, bool> rh = response_handlers_.insert(std::make_pair(key, boost::shared_ptr<response_handler>()));
+	std::pair<response_handlers_t::iterator, bool>
+		rh = response_handlers_.insert(std::make_pair(key, boost::shared_ptr<response_handler>()));
 
 	if (rh.second) {
 		rh.first->second.reset(new response_handler(node_.io_service()));

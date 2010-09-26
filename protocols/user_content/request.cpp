@@ -34,11 +34,16 @@
 #include "payload_content_buffer.hpp"
 #include "request.hpp"
 #include "fragment.hpp"
-#include "node.hpp"
+#include <payload_request.hpp>
+#include <node.hpp>
+#include <boost/make_shared.hpp>
 
 using namespace user_content;
 
-void content_request::initiate_request(protocol_id protocol, const content_identifier& key, local_node& node, content_size_t content_size)
+void content_request::initiate_request(protocol_id protocol,
+                                       const content_identifier& key,
+                                       local_node& node,
+                                       content_size_t content_size)
 {
 	last_indirect_request_peer_ = node.id();
 	content_size_ = content_size;
@@ -93,8 +98,6 @@ bool content_request::snoop_packet(local_node& node, packet::ptr_t pkt)
 		}
 
 		if ( !direct_request_pending_ ) {
-
-
 			pkt->destination(pkt->source());
 			pkt->source(node.id());
 			pkt->content_status(packet::content_requested);

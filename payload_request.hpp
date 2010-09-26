@@ -31,14 +31,48 @@
 //
 // Contact:  Steven Siloti <ssiloti@gmail.com>
 
-#include "key.hpp"
-#include "core.hpp"
+#ifndef PAYLOAD_REQUEST_HPP
+#define PAYLOAD_REQUEST_HPP
 
-const static unsigned char max_key_value_[network_key::packed_size] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-                                                                       0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-const network_key key_max(max_key_value_);
+#include "packet.hpp"
+#include <boost/make_shared.hpp>
 
-const static unsigned char min_key_value_[network_key::packed_size] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                                                                       0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-const network_key key_min(max_key_value_);
+class payload_request : public sendable_payload
+{
+public:
+	virtual content_size_t content_size() const
+	{
+		return size;
+	}
 
+	virtual std::vector<const_buffer> serialize(packet::const_ptr_t pkt, std::size_t threshold, mutable_buffer scratch) const
+	{
+		packed_request* req = buffer_cast<packed_request*>(scratch);
+		pkt->source().encode(req->key);
+		u64(req->content_size, size);
+		return std::vector<const_buffer>(1, buffer(scratch, sizeof(packed_request) + pkt->name().serialize(scratch + sizeof(packed_request))));
+	}
+
+	static std::size_t parse(packet::ptr_t pkt, const_buffer buf)
+	{
+		const packed_request* req = buffer_cast<const packed_request*>(buf);
+
+		pkt->source(network_key(req->key));
+		pkt->payload(boost::make_shared<payload_request>(u64(req->content_size)));
+		return sizeof(packed_request) + pkt->name().parse(buf + sizeof(packed_request));
+	}
+
+	payload_request(content_size_t s) : size(s) {}
+
+	content_size_t size;
+
+private:
+	struct packed_request
+	{
+		boost::uint8_t key[network_key::packed_size];
+		boost::uint8_t content_size[8];
+	};
+};
+
+
+#endif

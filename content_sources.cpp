@@ -31,14 +31,16 @@
 //
 // Contact:  Steven Siloti <ssiloti@gmail.com>
 
-#include "key.hpp"
-#include "core.hpp"
+#include "payload_sources.hpp"
+#include "content_sources.hpp"
+#include <boost/make_shared.hpp>
 
-const static unsigned char max_key_value_[network_key::packed_size] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-                                                                       0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-const network_key key_max(max_key_value_);
-
-const static unsigned char min_key_value_[network_key::packed_size] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                                                                       0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-const network_key key_min(max_key_value_);
-
+sendable_payload::ptr_t content_sources::get_payload()
+{
+	if (sources.empty())
+		return sendable_payload::ptr_t();
+	else if (sources.begin()->second.ep.address().is_v4())
+		return boost::make_shared<payload_content_sources_v4>(shared_from_this());
+	else
+		return boost::make_shared<payload_content_sources_v6>(shared_from_this());
+}

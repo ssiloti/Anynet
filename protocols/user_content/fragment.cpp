@@ -32,22 +32,25 @@
 // Contact:  Steven Siloti <ssiloti@gmail.com>
 
 #include "fragment.hpp"
-#include "connection.hpp"
-#include "node.hpp"
+#include <connection.hpp>
+#include <node.hpp>
 
 using namespace user_content;
 
-struct packed_fragment_header
+namespace
 {
-	boost::uint8_t frame_type;
-	boost::uint8_t rsvd0;
-	boost::uint8_t protocol[2];
-	boost::uint8_t status_name_components;
-	boost::uint8_t rsvd1[3];
-	boost::uint8_t key[network_key::packed_size];
-	boost::uint8_t offset[8];
-	boost::uint8_t size[8];
-};
+	struct packed_fragment_header
+	{
+		boost::uint8_t frame_type;
+		boost::uint8_t rsvd0;
+		boost::uint8_t protocol[2];
+		boost::uint8_t status_name_components;
+		boost::uint8_t rsvd1[3];
+		boost::uint8_t key[network_key::packed_size];
+		boost::uint8_t offset[8];
+		boost::uint8_t size[8];
+	};
+}
 
 std::size_t frame_fragment::header_size()
 {
@@ -113,6 +116,16 @@ std::vector<const_buffer> frame_fragment::serialize(std::size_t threshold, mutab
 	}
 
 	return buffers;
+}
+
+bool frame_fragment::done(std::size_t bytes_transfered)
+{
+	if (status_ == status_attached) {
+		std::size_t payload_size = bytes_transfered - header_size() - id().name.serialize(mutable_buffer(), false);
+		offset_ += payload_size;
+		size_ -= payload_size;
+	}
+	return size() == 0 || status() != status_attached;
 }
 
 void frame_fragment::send_failure(local_node& node, const network_key& dest)

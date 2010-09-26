@@ -59,10 +59,15 @@ class local_node;
 struct stored_hunk
 {
 	stored_hunk(protocol_id p, content_identifier k, std::size_t s, int closer, bool local)
-		: protocol(p), id(k), size(s), closer_peers(closer), local_requested(local),
-		last_access(boost::date_time::not_a_date_time),
-		stored(boost::date_time::not_a_date_time)
+		: protocol(p)
+		, id(k)
+		, size(s)
+		, closer_peers(closer)
+		, local_requested(local)
+		, last_access(boost::date_time::not_a_date_time)
+		, stored(boost::date_time::not_a_date_time)
 	{}
+
 	content_identifier id;
 	boost::posix_time::ptime last_access;
 	boost::posix_time::ptime stored;
@@ -77,15 +82,14 @@ typedef stored_hunks_t::iterator hunk_descriptor_t;
 
 namespace detail
 {
-// We have to put the mapping in a base class to ensure that it is initialized before the region
-struct mapped_content_base
-{
-	mapped_content_base(const std::string& path) : mapping(path.c_str(), read_write) {}
-	file_mapping mapping;
-};
+	// We have to put the mapping in a base class to ensure that it is initialized before the region
+	struct mapped_content_base
+	{
+		mapped_content_base(const std::string& path) : mapping(path.c_str(), read_write) {}
+		file_mapping mapping;
+	};
 
-class content_store_base;
-
+	class content_store_base;
 }
 
 struct mapped_content : ::detail::mapped_content_base, public mutable_shared_buffer
@@ -96,18 +100,22 @@ struct mapped_content : ::detail::mapped_content_base, public mutable_shared_buf
 	typedef boost::shared_ptr<const mapped_content> const_ptr;
 
 	mapped_content(const std::string& path, std::size_t size)
-		: ::detail::mapped_content_base(path), region(mapping, read_write, 0, size), deleted(false)
+		: ::detail::mapped_content_base(path)
+		, region(mapping, read_write, 0, size)
+		, deleted(false)
 	{}
 
 	mapped_content(const std::string& path, std::size_t size, bool temp)
-		: ::detail::mapped_content_base(temp_path(path, size)), region(mapping, read_write, 0, size), deleted(true)
+		: ::detail::mapped_content_base(temp_path(path, size))
+		, region(mapping, read_write, 0, size)
+		, deleted(true)
 	{
 		std::stringstream ss;
 		ss << mapping.get_name() << '-' << std::hex << this;
 		std::rename(mapping.get_name(), ss.str().c_str());
 	}
 
-	virtual mutable_buffer get() { return buffer(region.get_address(), region.get_size()); }
+	virtual mutable_buffer get()     { return buffer(region.get_address(), region.get_size()); }
 	virtual const_buffer get() const { return buffer(region.get_address(), region.get_size()); }
 
 	~mapped_content()

@@ -100,9 +100,9 @@ public:
 		boost::asio::deadline_timer timeout;
 
 	private:
-		oob_peer(local_node& node, connection::ptr_t con) : con(con), node(node), timeout(node.io_service())
-		{
-		}
+		oob_peer(local_node& node, connection::ptr_t con)
+			: con(con), node(node), timeout(node.io_service())
+		{}
 	};
 	friend struct oob_peer;
 
@@ -110,17 +110,19 @@ public:
 	~local_node();
 
 	// getters
-	boost::asio::io_service& io_service() { return acceptor_.get_io_service(); }
-	const network_key& id() const { return identity_; }
-	const ip::tcp::endpoint& public_endpoint() const { return public_endpoint_; }
-	bool is_v4() const { return public_endpoint_.address().is_v4(); }
-	bool is_v6() const { return public_endpoint_.address().is_v6(); }
+	boost::asio::io_service& io_service()                        { return acceptor_.get_io_service(); }
+	const network_key& id() const                                { return identity_; }
+	const ip::tcp::endpoint& public_endpoint() const             { return public_endpoint_; }
+	bool is_v4() const                                           { return public_endpoint_.address().is_v4(); }
+	bool is_v6() const                                           { return public_endpoint_.address().is_v6(); }
 	std::vector<connection::ptr_t>::size_type connection_count() { return ib_peers_.size(); }
-	const client_config& config() const { return config_; }
-	boost::posix_time::time_duration base_hunk_lifetime();
-	boost::posix_time::time_duration age() const { return boost::posix_time::second_clock::universal_time() - created_; }
-	std::size_t average_oob_threshold() const { return avg_oob_threshold_; }
+	const client_config& config() const                          { return config_; }
+	boost::posix_time::time_duration age() const                 { return boost::posix_time::second_clock::universal_time() - created_; }
+	std::size_t average_oob_threshold() const                    { return avg_oob_threshold_; }
+
 	std::vector<protocol_id> supported_protocols() const;
+
+	boost::posix_time::time_duration base_hunk_lifetime();
 
 	// connections
 	void make_connection(ip::tcp::endpoint peer);
@@ -133,8 +135,7 @@ public:
 	{
 		return *boost::static_pointer_cast<P>( protocol_handlers_.find(P::protocol_id)->second );
 	}
-	network_protocol& get_protocol(packet::ptr_t pkt) { return get_protocol(pkt->protocol()); }
-//	network_protocol& get_protocol(frame_fragment::ptr_t frag) { return get_protocol(frag->protocol()); }
+	network_protocol& get_protocol(packet::const_ptr_t pkt) { return get_protocol(pkt->protocol()); }
 	network_protocol& get_protocol(protocol_id pid) { return *protocol_handlers_.find(pid)->second; }
 
 	bool register_protocol_handler(protocol_id id, network_protocol::ptr_t proto)
@@ -163,9 +164,6 @@ public:
 	void incoming_packet(connection::ptr_t con, packet::ptr_t pkt, std::size_t payload_size);
 	void packet_received(connection::ptr_t con, packet::ptr_t pkt);
 
-//	void incoming_fragment(connection::ptr_t con, frame_fragment::ptr_t frag, std::size_t payload_size);
-//	void fragment_received(connection::ptr_t con, frame_fragment::ptr_t frag);
-
 	void incoming_protocol_frame(connection::ptr_t con, protocol_id protocol, boost::uint8_t frame_type);
 
 	// failures
@@ -177,12 +175,12 @@ public:
 	hunk_descriptor_t cache_store(protocol_id pid, content_identifier id, std::size_t size);
 	hunk_descriptor_t cache_remote_request(protocol_id pid, content_identifier id, std::size_t size, boost::posix_time::time_duration request_delta);
 	hunk_descriptor_t load_existing_hunk(protocol_id pid, content_identifier id, std::size_t size);
-	hunk_descriptor_t not_a_hunk() { return stored_hunks_.end(); }
+	hunk_descriptor_t not_a_hunk()          { return stored_hunks_.end(); }
 	void erase_hunk(hunk_descriptor_t desc) { stored_hunks_.erase(desc); }
 
 	// credit accounting
 	void sent_content(const network_key& id, std::size_t bytes) { traffic_stats_.sent_content(id, bytes); }
-	const known_peers& get_known_peers() { return traffic_stats_; }
+	const known_peers& get_known_peers() const                  { return traffic_stats_; }
 
 	rolling_stats sources_per_hunk;
 
@@ -203,26 +201,32 @@ private:
 	bool try_prune_cache(std::size_t size, int closer_peers, boost::posix_time::time_duration age);
 
 	// successors
-	std::vector<connection::ptr_t>::iterator sucessor(const network_key& key, const network_key& inner_id, content_size_t content_size = 0);
+	std::vector<connection::ptr_t>::iterator
+	sucessor(const network_key& key,
+	         const network_key& inner_id,
+	         content_size_t content_size = 0);
 
 	template <network_key dist_fn(const network_key& src, const network_key& dest)>
-	std::vector<connection::ptr_t>::iterator best_peer(const network_key& outer_id,
-	                                                   const network_key& inner_id,
-	                                                   const network_key& key,
-	                                                   content_size_t content_size = 0);
+	std::vector<connection::ptr_t>::iterator
+	best_peer(const network_key& outer_id,
+	          const network_key& inner_id,
+	          const network_key& key,
+	          content_size_t content_size = 0);
 
 	// doesn't take ancillary factors into account, it will always return the closest node in terms of key distance
 	template <network_key dist_fn(const network_key& src, const network_key& dest)>
-	std::vector<connection::ptr_t>::iterator closest_peer(const network_key& outer_id,
-	                                                      const network_key& inner_id,
-	                                                      const network_key& key,
-	                                                      content_size_t content_size = 0);
+	std::vector<connection::ptr_t>::iterator
+	closest_peer(const network_key& outer_id,
+	             const network_key& inner_id,
+	             const network_key& key,
+	             content_size_t content_size = 0);
 
 	template <network_key dist_fn(const network_key& src, const network_key& dest)>
-	std::vector<connection::ptr_t>::const_iterator closest_peer(const network_key& outer_id,
-	                                                            const network_key& inner_id,
-	                                                            const network_key& key,
-	                                                            content_size_t content_size = 0) const;
+	std::vector<connection::ptr_t>::const_iterator
+	closest_peer(const network_key& outer_id,
+	             const network_key& inner_id,
+	             const network_key& key,
+	             content_size_t content_size = 0) const;
 
 	template <network_key dist_fn(const network_key& src, const network_key& dest)>
 	int closer_peers(const network_key& src, const network_key& dest) const;

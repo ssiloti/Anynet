@@ -39,14 +39,6 @@
 #include <boost/cstdint.hpp>
 #include <vector>
 
-template <typename AsyncReadStream, typename MutableBufferSequence,
-    typename CompletionCondition, typename ReadHandler>
-void async_read_fu(AsyncReadStream& s, const MutableBufferSequence& buffers,
-    CompletionCondition completion_condition, ReadHandler handler)
-{
-	boost::asio::async_read(s, buffers, completion_condition, handler);
-}
-
 class content_name
 {
 	friend bool operator<(const content_name&, const content_name&);
@@ -156,7 +148,7 @@ private:
 			}
 		}
 
-		async_read_fu(link.socket,
+		boost::asio::async_read(link.socket,
 		                        mutable_buffers_1(link.receive_buffer(bytes_needed)),
 		                        boost::asio::transfer_at_least(bytes_needed),
 		                        boost::bind(&content_name::receive_component<Handler>,

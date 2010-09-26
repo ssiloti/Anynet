@@ -36,8 +36,8 @@
 
 #include "fragmented_content.hpp"
 #include <protocol.hpp>
-#include "packet.hpp"
-#include "core.hpp"
+#include <packet.hpp>
+#include <core.hpp>
 
 class local_node;
 

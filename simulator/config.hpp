@@ -42,9 +42,9 @@ class client_config
 public:
 	client_config(int id);
 
-	std::string listen_ip() const { return listen_ip_; }
-	unsigned short listen_port() const { return port_; }
-	std::string content_store_path() const { return content_store_path_; }
+	std::string listen_ip() const             { return listen_ip_; }
+	unsigned short listen_port() const        { return port_; }
+	std::string content_store_path() const    { return content_store_path_; }
 	boost::uint64_t target_store_size() const { return store_size_; }
 
 

@@ -47,38 +47,29 @@ class network_simulator
 public:
 	network_simulator();
 
-	int node_lifetime() { return time_ + int(node_lifetime_()); }
+	int node_lifetime()                     { return time_ + int(node_lifetime_()); }
 
 	int insert_non_authoritative_interval() { return time_ + int(insert_non_authoritative_interval_()); }
-	int get_non_authoritative_interval() { return time_ + int(get_non_authoritative_interval_()); }
+	int get_non_authoritative_interval()    { return time_ + int(get_non_authoritative_interval_()); }
 
 	void new_non_authoritative(network_key id) { assert(!node_created(id)); non_authoritative_hunks_.queue.push_back(id); }
-	network_key get_non_authoritative()
-	{
-		if (non_authoritative_hunks_.active.size()) {
-			std::map<network_key, hunk_stats>::iterator hunk = non_authoritative_hunks_.active.begin();
-			double idx = boost::variate_generator<boost::mt19937&, boost::uniform_real<> >( rng_, boost::uniform_real<>(0.0, std::pow(non_authoritative_hunks_.active.size() - 1, 2.0)) )();
-			int index(int(std::floor(std::sqrt(idx) + 0.5)));
-			while (index--) ++hunk;
-			assert(!node_created(hunk->first));
-			return hunk->first;
-		}
-		else
-			return key_max;
-	}
+	network_key get_non_authoritative();
 	void stored_non_authoritative_hunk(network_key id);
 
 	void failed_non_authoritative_retrieval() { failed_retrievals_.push_back(0); }
-	void sucessful_retrieval() { ++sucessful_retrievals_; }
+	void sucessful_retrieval()                { ++sucessful_retrievals_; }
 
 	void tick();
 
 	void run() { io_service.run(); }
 
-	void begin_query() { ++outstanding_queries; DLOG(INFO) << "Begin Q " << outstanding_queries; }
+	void begin_query()    { ++outstanding_queries; DLOG(INFO) << "Begin Q " << outstanding_queries; }
 	void complete_query() { assert(outstanding_queries); --outstanding_queries; DLOG(INFO) << "End Q " << outstanding_queries; }
 
-	void kill_node(boost::shared_ptr<traffic_generator> node) { client_hitlist_.push_back(std::find(clients.begin(), clients.end(), node)); }
+	void kill_node(boost::shared_ptr<traffic_generator> node)
+	{
+		client_hitlist_.push_back(std::find(clients.begin(), clients.end(), node));
+	}
 
 	bool node_created(const network_key& id);
 

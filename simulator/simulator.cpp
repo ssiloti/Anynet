@@ -33,7 +33,7 @@
 
 #include "simulator.hpp"
 #include "traffic_generator.hpp"
-#include "signature_schemes/user_content/non_authoritative.hpp"
+#include "protocols/user_content/non_authoritative.hpp"
 #include "node.hpp"
 #include <boost/smart_ptr.hpp>
 #include <vector>

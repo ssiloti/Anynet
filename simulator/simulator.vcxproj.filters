@@ -13,16 +13,16 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
-    <Filter Include="Header Files\Signature">
+    <Filter Include="Header Files\Protocols">
       <UniqueIdentifier>{a4477119-ce8b-45a6-90fb-3a0c90f09c72}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\Signature">
+    <Filter Include="Source Files\Protocols">
       <UniqueIdentifier>{9cf2e354-8efc-498e-9ba7-77c70de25ccf}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Header Files\Signature\User Content">
+    <Filter Include="Header Files\Protocols\User Content">
       <UniqueIdentifier>{d4711511-8248-4359-81f0-de2c27b35298}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\Signature\User Content">
+    <Filter Include="Source Files\Protocols\User Content">
       <UniqueIdentifier>{8d57990e-afe3-4458-bd61-ffd9b33dfedc}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
@@ -75,32 +75,32 @@
     <ClInclude Include="..\content.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\signature_schemes\user_content\fragment.hpp">
-      <Filter>Header Files\Signature\User Content</Filter>
+    <ClInclude Include="..\protocols\user_content\fragment.hpp">
+      <Filter>Header Files\Protocols\User Content</Filter>
     </ClInclude>
-    <ClInclude Include="..\signature_schemes\user_content\non_authoritative.hpp">
-      <Filter>Header Files\Signature\User Content</Filter>
+    <ClInclude Include="..\protocols\user_content\non_authoritative.hpp">
+      <Filter>Header Files\Protocols\User Content</Filter>
     </ClInclude>
-    <ClInclude Include="..\signature_schemes\user_content\user_content_fwd.hpp">
-      <Filter>Header Files\Signature\User Content</Filter>
+    <ClInclude Include="..\protocols\user_content\user_content_fwd.hpp">
+      <Filter>Header Files\Protocols\User Content</Filter>
     </ClInclude>
-    <ClInclude Include="..\signature_schemes\user_content\fragmented_content.hpp">
-      <Filter>Header Files\Signature\User Content</Filter>
+    <ClInclude Include="..\protocols\user_content\fragmented_content.hpp">
+      <Filter>Header Files\Protocols\User Content</Filter>
     </ClInclude>
-    <ClInclude Include="..\signature_schemes\user_content\request.hpp">
-      <Filter>Header Files\Signature\User Content</Filter>
+    <ClInclude Include="..\protocols\user_content\request.hpp">
+      <Filter>Header Files\Protocols\User Content</Filter>
     </ClInclude>
-    <ClInclude Include="..\signature_schemes\user_content\payload_content_buffer.hpp">
-      <Filter>Header Files\Signature\User Content</Filter>
+    <ClInclude Include="..\protocols\user_content\payload_content_buffer.hpp">
+      <Filter>Header Files\Protocols\User Content</Filter>
     </ClInclude>
-    <ClInclude Include="..\signature_schemes\indirect_credit.hpp">
-      <Filter>Header Files\Signature</Filter>
+    <ClInclude Include="..\protocols\indirect_credit.hpp">
+      <Filter>Header Files\Protocols</Filter>
     </ClInclude>
     <ClInclude Include="..\protocol.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\signature_schemes\user_content\content_protocol.hpp">
-      <Filter>Header Files\Signature\User Content</Filter>
+    <ClInclude Include="..\protocols\user_content\content_protocol.hpp">
+      <Filter>Header Files\Protocols\User Content</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -137,26 +137,26 @@
     <ClCompile Include="simulator.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\signature_schemes\indirect_credit.cpp">
-      <Filter>Source Files\Signature</Filter>
+    <ClCompile Include="..\protocols\indirect_credit.cpp">
+      <Filter>Source Files\Protocols</Filter>
     </ClCompile>
-    <ClCompile Include="..\signature_schemes\user_content\fragment.cpp">
-      <Filter>Source Files\Signature\User Content</Filter>
+    <ClCompile Include="..\protocols\user_content\fragment.cpp">
+      <Filter>Source Files\Protocols\User Content</Filter>
     </ClCompile>
-    <ClCompile Include="..\signature_schemes\user_content\non_authoritative.cpp">
-      <Filter>Source Files\Signature\User Content</Filter>
+    <ClCompile Include="..\protocols\user_content\non_authoritative.cpp">
+      <Filter>Source Files\Protocols\User Content</Filter>
     </ClCompile>
-    <ClCompile Include="..\signature_schemes\user_content\fragmented_content.cpp">
-      <Filter>Source Files\Signature\User Content</Filter>
+    <ClCompile Include="..\protocols\user_content\fragmented_content.cpp">
+      <Filter>Source Files\Protocols\User Content</Filter>
     </ClCompile>
-    <ClCompile Include="..\signature_schemes\user_content\request.cpp">
-      <Filter>Source Files\Signature\User Content</Filter>
+    <ClCompile Include="..\protocols\user_content\request.cpp">
+      <Filter>Source Files\Protocols\User Content</Filter>
     </ClCompile>
     <ClCompile Include="..\protocol.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\signature_schemes\user_content\content_protocol.cpp">
-      <Filter>Source Files\Signature\User Content</Filter>
+    <ClCompile Include="..\protocols\user_content\content_protocol.cpp">
+      <Filter>Source Files\Protocols\User Content</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

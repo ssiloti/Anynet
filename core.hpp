@@ -50,13 +50,13 @@
 typedef boost::uint16_t protocol_id;
 typedef boost::uint64_t content_size_t;
 
-enum defined_signature_schemes
+enum defined_protocols
 {
-	signature_sha256            = 0,
-	signature_sha1_rsa          = 1,
-	signature_sha1_rsa_x509     = 2,
-	signature_sha1_rsa_credits  = 3,
-	signature_sha1_sha2         = 4,
+	protocol_sha256            = 0,
+	protocol_sha1_rsa          = 1,
+	protocol_sha1_rsa_x509     = 2,
+	protocol_sha1_rsa_credits  = 3,
+	protocol_sha1_sha2         = 4,
 };
 
 class network_key;

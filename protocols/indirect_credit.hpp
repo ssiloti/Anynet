@@ -165,7 +165,7 @@ private:
 class indirect_credit : public network_protocol
 {
 public:
-	static const protocol_id protocol_id = signature_sha1_rsa_credits;
+	static const protocol_id protocol_id = protocol_sha1_rsa_credits;
 
 	static void create(local_node& node)
 	{

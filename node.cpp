@@ -684,7 +684,7 @@ void local_node::packet_received(connection::ptr_t con, packet::ptr_t pkt)
 		else if (we_are_successor
 		         && pkt->content_status() == packet::content_detached
 		         && pkt->source() == pkt->destination()
-		         && pkt->protocol() == signature_sha256) {
+		         && pkt->protocol() == protocol_sha256) {
 			sim.new_non_authoritative(pkt->publisher());
 		}
 #endif

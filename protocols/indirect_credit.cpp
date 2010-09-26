@@ -31,7 +31,7 @@
 //
 // Contact:  Steven Siloti <ssiloti@gmail.com>
 
-#include "signature_schemes/indirect_credit.hpp"
+#include "protocols/indirect_credit.hpp"
 #include "node.hpp"
 #include <boost/bind/protect.hpp>
 #include <boost/bind.hpp>

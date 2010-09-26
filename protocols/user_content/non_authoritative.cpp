@@ -31,7 +31,7 @@
 //
 // Contact:  Steven Siloti <ssiloti@gmail.com>
 
-#include "signature_schemes/user_content/non_authoritative.hpp"
+#include "protocols/user_content/non_authoritative.hpp"
 #include "node.hpp"
 
 struct packed_content

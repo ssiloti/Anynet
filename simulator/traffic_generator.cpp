@@ -31,8 +31,8 @@
 //
 // Contact:  Steven Siloti <ssiloti@gmail.com>
 
-#include "signature_schemes/user_content/non_authoritative.hpp"
-#include "signature_schemes/indirect_credit.hpp"
+#include "protocols/user_content/non_authoritative.hpp"
+#include "protocols/indirect_credit.hpp"
 #include "traffic_generator.hpp"
 #include "simulator.hpp"
 #include "peer_cache.hpp"

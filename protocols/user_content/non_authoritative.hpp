@@ -50,7 +50,7 @@
 class non_authoritative : public user_content::content_protocol
 {
 public:
-	static const protocol_id protocol_id = signature_sha256;
+	static const protocol_id protocol_id = protocol_sha256;
 
 	struct insert_buffer : public mutable_shared_buffer
 	{

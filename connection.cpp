@@ -76,9 +76,20 @@ struct successor_frame
 };
 
 connection::connection(local_node& node, routing_type rtype)
-: node_(node), link_(node.io_service(), node.context), routing_type_(rtype), incoming_port_(0),
-	lifecycle_(connecting), oob_threshold_(min_oob_threshold), local_oob_threshold_(min_oob_threshold), receive_outstanding_(false),
-	outstanding_non_packet_frames_(0), ack_sends_needed_(0)
+	: node_(node)
+	, link_(node.io_service()
+	, node.context)
+	, routing_type_(rtype)
+	, incoming_port_(0)
+	, lifecycle_(connecting)
+	, oob_threshold_(min_oob_threshold)
+	, local_oob_threshold_(min_oob_threshold)
+	, receive_outstanding_(false)
+	, outstanding_non_packet_frames_(0)
+	, ack_sends_needed_(0)
+#ifdef SIMULATION
+	, send_delay_(node.io_service(), boost::posix_time::ptime(boost::date_time::not_a_date_time))
+#endif
 {
 
 }
@@ -634,10 +645,24 @@ void connection::send_next_frame()
 	else if (!packet_queue_.empty()) {
 		DLOG(INFO) << "Sending packet from " << std::string(node_.id()) << " to " << std::string(remote_id());
 
+#ifdef SIMULATION
+		if (send_delay_.expires_at() == boost::date_time::not_a_date_time)
+#endif
+			packet_queue_.front().pkt->trim(oob_threshold());
+
 		const std::vector<const_buffer>& send_buffers = packet_queue_.front().pkt->serialize(oob_threshold(), link_.send_buffer());
 		std::size_t bytes_transfered = 0;
 		for (std::vector<const_buffer>::const_iterator buf = send_buffers.begin(); buf != send_buffers.end(); ++buf)
 			bytes_transfered += buffer_size(*buf);
+		
+#ifdef SIMULATION
+		if (send_delay_.expires_at() == boost::date_time::not_a_date_time) {
+			send_delay_.expires_from_now(boost::posix_time::milliseconds(bytes_transfered));
+			send_delay_.async_wait(boost::bind(&connection::send_delayed_frame, shared_from_this(), placeholders::error));
+			return;
+		}
+		send_delay_.expires_at(boost::date_time::not_a_date_time);
+#endif
 		ack_queue_.push_back(pending_ack(packet_queue_.front().entered, bytes_transfered));
 
 		assert(buffer_cast<const boost::uint8_t*>(send_buffers[0])[0] == 0);
@@ -654,10 +679,24 @@ void connection::send_next_frame()
 	else if (!frame_queue_.empty()) {
 		DLOG(INFO) << "Sending fragment from " << std::string(node_.id()) << " to " << std::string(remote_id());
 
+#ifdef SIMULATION
+		if (send_delay_.expires_at() == boost::date_time::not_a_date_time)
+#endif
+			frame_queue_.front().frame->trim(oob_threshold());
+
 		const std::vector<const_buffer>& send_buffers = frame_queue_.front().frame->serialize(oob_threshold(), link_.send_buffer());
 		std::size_t bytes_transfered = 0;
 		for (std::vector<const_buffer>::const_iterator buf = send_buffers.begin(); buf != send_buffers.end(); ++buf)
 			bytes_transfered += buffer_size(*buf);
+
+#ifdef SIMULATION
+		if (send_delay_.expires_at() == boost::date_time::not_a_date_time) {
+			send_delay_.expires_from_now(boost::posix_time::milliseconds(bytes_transfered));
+			send_delay_.async_wait(boost::bind(&connection::send_delayed_frame, shared_from_this(), placeholders::error));
+			return;
+		}
+		send_delay_.expires_at(boost::date_time::not_a_date_time);
+#endif
 		ack_queue_.push_back(pending_ack(frame_queue_.front().entered, bytes_transfered));
 
 		DLOG(INFO) << "Sending " << bytes_transfered << " fragment bytes";
@@ -698,7 +737,7 @@ void connection::protocol_frame_sent(const boost::system::error_code& error, std
 	//	update_local_threshold(boost::posix_time::microsec_clock::universal_time() - frame_sent_, bytes_transfered);
 		node_.sent_content(remote_id(), bytes_transfered);
 
-		if (frame_queue_.front().frame->done())
+		if (frame_queue_.front().frame->done(bytes_transfered))
 			frame_queue_.pop_front();
 
 		send_next_frame();
@@ -766,6 +805,10 @@ void connection::redispatch_send_queue()
 	packet_queue_.clear();
 }
 
-//void connection::link_shutdown(const boost::system::error_code& error)
-//{
-//}
+#ifdef SIMULATION
+void connection::send_delayed_frame(const boost::system::error_code& error)
+{
+	if (!error)
+		send_next_frame();
+}
+#endif

@@ -85,7 +85,7 @@ public:
 		return size;
 	}
 
-	virtual std::vector<const_buffer> serialize(packet::ptr_t pkt, std::size_t threshold, mutable_buffer scratch) const
+	virtual std::vector<const_buffer> serialize(packet::const_ptr_t pkt, std::size_t threshold, mutable_buffer scratch) const
 	{
 		packed_request* req = buffer_cast<packed_request*>(scratch);
 		pkt->source().encode(req->key);
@@ -123,7 +123,7 @@ public:
 		return sizeof(packed_error);
 	}
 
-	virtual std::vector<const_buffer> serialize(packet::ptr_t pkt, std::size_t threshold, mutable_buffer scratch) const
+	virtual std::vector<const_buffer> serialize(packet::const_ptr_t pkt, std::size_t threshold, mutable_buffer scratch) const
 	{
 		packed_error* error = buffer_cast<packed_error*>(scratch);
 		pkt->source().encode(error->key);
@@ -255,7 +255,7 @@ public:
 		return get()->size;
 	}
 
-	virtual std::vector<const_buffer> serialize(packet::ptr_t pkt, std::size_t threshold, mutable_buffer scratch) const
+	virtual std::vector<const_buffer> serialize(packet::const_ptr_t pkt, std::size_t threshold, mutable_buffer scratch) const
 	{
 		packed_detached_sources* s = buffer_cast<packed_detached_sources*>(scratch);
 		int source_send_count = std::min(get()->sources.size(), (buffer_size(scratch) - sizeof(packed_detached_sources)) / sizeof(packed_source_address));

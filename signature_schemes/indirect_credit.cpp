@@ -218,7 +218,7 @@ class payload_credits : public sendable_payload
 public:
 	typedef Store store_type;
 
-	virtual std::vector<const_buffer> serialize(boost::shared_ptr<packet> pkt, std::size_t threshold, mutable_buffer scratch) const
+	virtual std::vector<const_buffer> serialize(boost::shared_ptr<const packet> pkt, std::size_t threshold, mutable_buffer scratch) const
 	{
 		boost::uint8_t* scratch_base = buffer_cast<boost::uint8_t*>(scratch);
 

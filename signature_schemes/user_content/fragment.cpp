@@ -54,7 +54,7 @@ std::size_t frame_fragment::header_size()
 	return sizeof(packed_fragment_header);
 }
 
-std::size_t frame_fragment::serialize_header(mutable_buffer buf)
+std::size_t frame_fragment::serialize_header(mutable_buffer buf) const
 {
 	packed_fragment_header* h = buffer_cast<packed_fragment_header*>(buf);
 
@@ -99,7 +99,7 @@ unsigned frame_fragment::parse_header(const_buffer buf)
 	return h->status_name_components & 0x3F;
 }
 
-std::vector<const_buffer> frame_fragment::serialize(std::size_t threshold, mutable_buffer scratch)
+std::vector<const_buffer> frame_fragment::serialize(std::size_t threshold, mutable_buffer scratch) const
 {
 	DLOG(INFO) << "Sending fragment id=" << std::string(id().publisher);
 	assert(buffer_size(scratch) >= sizeof(packed_fragment_header));
@@ -110,8 +110,6 @@ std::vector<const_buffer> frame_fragment::serialize(std::size_t threshold, mutab
 	if (status_ == status_attached) {
 		std::size_t payload_size = std::min(size_, std::max(threshold, std::size_t(2048)));
 		buffers.push_back(buffer(payload_->get() + offset_, payload_size));
-		offset_ += payload_size;
-		size_ -= payload_size;
 	}
 
 	return buffers;

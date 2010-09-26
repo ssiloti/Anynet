@@ -1,5 +1,6 @@
 check for attached/requested content larger than size_t
 better unkown protocol handling, allow everything but attached content
+get stored content loading working
 oob threshold modulation based on crediting
 user configurable traffic throttling
 oob transfer state protocol

@@ -38,15 +38,6 @@
 #include <boost/bind.hpp>
 #include <cstring>
 
-/*
-bool content_sources::source_cmp::operator()(const source& l, const source& r)
-{
-	if (!valid_dest)
-		return l.ep < r.ep;
-
-	return ::distance(network_key(l.ip), dest) < ::distance(network_key(r.ip), dest);
-}*/
-
 struct packed_header
 {
 	boost::uint8_t frame_type;
@@ -72,7 +63,7 @@ content_size_t packet::parse_header(const_buffer buf)
 	return u64(header->payload_size);
 }
 
-std::size_t packet::serialize_header(mutable_buffer buf)
+std::size_t packet::serialize_header(mutable_buffer buf) const
 {
 	packed_header* header = buffer_cast<packed_header*>(buf);
 	
@@ -84,7 +75,12 @@ std::size_t packet::serialize_header(mutable_buffer buf)
 	return sizeof(packed_header);
 }
 
-std::vector<const_buffer> packet::serialize(std::size_t threshold,mutable_buffer scratch)
+void packet::trim(std::size_t threshold)
+{
+	payload_->trim(shared_from_this(), threshold);
+}
+
+std::vector<const_buffer> packet::serialize(std::size_t threshold, mutable_buffer scratch) const
 {
 	DLOG(INFO) << "Sending packet dest=" << std::string(destination());
 
@@ -99,8 +95,7 @@ std::vector<const_buffer> packet::serialize(std::size_t threshold,mutable_buffer
 
 		for (std::vector<const_buffer>::const_iterator pbuf = payload_buffers.begin(); pbuf != payload_buffers.end(); ++pbuf)
 			payload_size += buffer_size(*pbuf);
-		// HACK: The payload may have decided to change our status, update it here
-		h->status = content_status();
+
 		buffers.insert(buffers.end(), payload_buffers.begin(), payload_buffers.end());
 	}
 

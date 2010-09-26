@@ -47,7 +47,7 @@ public:
 		return buffer_size(payload->get());
 	}
 
-	virtual std::vector<const_buffer> serialize(boost::shared_ptr<packet> pkt, std::size_t threshold, mutable_buffer scratch) const
+	virtual void trim(boost::shared_ptr<packet> pkt, std::size_t threshold) const
 	{
 		const_buffer buf = payload->get();
 		if (buffer_size(buf) > threshold) {
@@ -58,11 +58,13 @@ public:
 				pkt->payload(boost::make_shared<payload_content_sources_v4>(self_source));
 			else
 				pkt->payload(boost::make_shared<payload_content_sources_v6>(self_source));
-			return pkt->payload()->serialize(pkt, threshold, scratch);
 		}
-		else {
-			return std::vector<const_buffer>(1, payload->get());
-		}
+	}
+
+	virtual std::vector<const_buffer> serialize(boost::shared_ptr<const packet> pkt, std::size_t threshold, mutable_buffer scratch) const
+	{
+		assert(buffer_size(payload->get()) <= threshold);
+		return std::vector<const_buffer>(1, payload->get());
 	}
 
 	payload_content_buffer(local_node& node, const_payload_buffer_ptr p) : node_(node), payload(p) {}

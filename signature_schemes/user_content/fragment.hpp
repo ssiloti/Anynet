@@ -79,7 +79,7 @@ public:
 	void trim_to(std::size_t s) { size_ = std::min(size_, s); }
 	void payload(const_payload_buffer_ptr p) { payload_ = p; }
 
-	fragment_status status() { return status_; }
+	fragment_status status() const { return status_; }
 
 	const_buffer buf() const { return buffer(payload_->get() + offset_, size_); }
 
@@ -89,9 +89,17 @@ public:
 	void to_reply(const_payload_buffer_ptr p);
 	void to_reply() { status_ = status_failed; }
 
-	virtual std::vector<const_buffer> serialize(std::size_t threshold, mutable_buffer scratch);
+	virtual std::vector<const_buffer> serialize(std::size_t threshold, mutable_buffer scratch) const;
 
-	virtual bool done() { return size() == 0 || status() != status_attached; }
+	virtual bool done(std::size_t bytes_transfered)
+	{
+		if (status_ == status_attached) {
+			std::size_t payload_size = bytes_transfered - header_size() - id().name.serialize(mutable_buffer(), false);
+			offset_ += payload_size;
+			size_ -= payload_size;
+		}
+		return size() == 0 || status() != status_attached;
+	}
 	virtual void send_failure(local_node& node, const network_key& dest);
 
 	template <typename Handler>
@@ -131,7 +139,7 @@ public:
 	void clear_padding() { padding_.clear(); }
 
 private:
-	std::size_t serialize_header(mutable_buffer buf);
+	std::size_t serialize_header(mutable_buffer buf) const;
 	unsigned parse_header(const_buffer buf);
 	std::size_t header_size();
 

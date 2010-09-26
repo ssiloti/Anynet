@@ -41,6 +41,7 @@
 #include "core.hpp"
 #include <boost/function.hpp>
 #include <boost/asio/write.hpp>
+#include <boost/asio/deadline_timer.hpp>
 #include <boost/date_time/posix_time/posix_time_types.hpp>
 #include <boost/enable_shared_from_this.hpp>
 #include <boost/shared_ptr.hpp>
@@ -65,7 +66,7 @@ public:
 		boost::uint8_t protocol[2];
 	};
 
-	virtual bool done() = 0;
+	virtual bool done(std::size_t bytes_transfered) = 0;
 	virtual void send_failure(local_node& node, const network_key& dest) = 0;
 };
 
@@ -326,8 +327,6 @@ private:
 	void protocol_frame_sent(const boost::system::error_code& error, std::size_t bytes_transfered);
 	void frame_sent(frame_bits frame_bit, const boost::system::error_code& error, std::size_t bytes_transfered);
 
-	//void packet_sent(const boost::system::error_code& error, std::size_t bytes_transferred);
-
 	void connection_accepted(const boost::system::error_code& error, ip::tcp::acceptor& incoming);
 	void ssl_handshake(boost::asio::ssl::stream_base::handshake_type type, const boost::system::error_code& error);
 	void write_handshake(const boost::system::error_code& error);
@@ -362,6 +361,11 @@ private:
 	unsigned ack_sends_needed_;
 
 	bool receive_outstanding_;
+
+#ifdef SIMULATION
+	void send_delayed_frame(const boost::system::error_code& error);
+	boost::asio::deadline_timer send_delay_;
+#endif
 };
 
 #endif

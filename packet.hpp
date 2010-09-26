@@ -61,7 +61,8 @@ public:
 		return 0;
 	}
 
-	virtual std::vector<const_buffer> serialize(boost::shared_ptr<packet> pkt, std::size_t threshold, mutable_buffer scratch) const = 0;
+	virtual void trim(boost::shared_ptr<packet> pkt, std::size_t threshold) const {}
+	virtual std::vector<const_buffer> serialize(boost::shared_ptr<const packet> pkt, std::size_t threshold, mutable_buffer scratch) const = 0;
 	virtual ~sendable_payload() {}
 };
 
@@ -91,7 +92,8 @@ public:
 		payload_ = payload;
 	}
 
-	virtual std::vector<const_buffer> serialize(std::size_t threshold, mutable_buffer scratch);
+	virtual void trim(std::size_t threshold);
+	virtual std::vector<const_buffer> serialize(std::size_t threshold, mutable_buffer scratch) const;
 
 	template <typename Handler>
 	void receive(net_link& link, Handler handler)
@@ -153,7 +155,7 @@ protected:
 	static std::size_t header_size();
 
 private:
-	std::size_t serialize_header(mutable_buffer buf);
+	std::size_t serialize_header(mutable_buffer buf) const;
 	content_size_t parse_header(const_buffer buf);
 
 	template <typename Handler>

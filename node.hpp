@@ -120,6 +120,8 @@ public:
 	boost::posix_time::time_duration age() const                 { return boost::posix_time::second_clock::universal_time() - created_; }
 	std::size_t average_oob_threshold() const                    { return avg_oob_threshold_; }
 
+	void update_threshold_stats();
+
 	std::vector<protocol_id> supported_protocols() const;
 
 	boost::posix_time::time_duration base_hunk_lifetime();
@@ -191,7 +193,6 @@ private:
 	void recompute_identity();
 	void snoop(packet::ptr_t pkt);
 	void disconnect_peer(connection::ptr_t con);
-	void update_threshold_stats();
 
 	void add_peer(connection::ptr_t peer);
 	void remove_peer(connection::ptr_t peer);

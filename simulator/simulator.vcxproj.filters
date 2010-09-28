@@ -176,5 +176,8 @@
     <ClCompile Include="..\content_sources.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\payload_request.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>

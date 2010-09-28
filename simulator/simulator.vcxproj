@@ -117,6 +117,7 @@
     <ClCompile Include="..\connection.cpp" />
     <ClCompile Include="..\content_sources.cpp" />
     <ClCompile Include="..\core.cpp" />
+    <ClCompile Include="..\payload_request.cpp" />
     <ClCompile Include="..\protocols\user_content\fragment.cpp" />
     <ClCompile Include="..\hunk.cpp" />
     <ClCompile Include="..\known_peers.cpp" />

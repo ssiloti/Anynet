@@ -31,26 +31,31 @@
 //
 // Contact:  Steven Siloti <ssiloti@gmail.com>
 
-#ifndef PAYLOAD_REQUEST_HPP
-#define PAYLOAD_REQUEST_HPP
+#include "payload_request.hpp"
+#include <boost/make_shared.hpp>
 
-#include "packet.hpp"
-
-class payload_request : public sendable_payload
+namespace
 {
-public:
-	virtual content_size_t content_size() const
+	struct packed_request
 	{
-		return size;
-	}
+		boost::uint8_t key[network_key::packed_size];
+		boost::uint8_t content_size[8];
+	};
+}
 
-	virtual std::vector<const_buffer> serialize(packet::const_ptr_t pkt, std::size_t threshold, mutable_buffer scratch) const;
-	static std::size_t parse(packet::ptr_t pkt, const_buffer buf);
+std::vector<const_buffer> payload_request::serialize(packet::const_ptr_t pkt, std::size_t threshold, mutable_buffer scratch) const
+{
+	packed_request* req = buffer_cast<packed_request*>(scratch);
+	pkt->source().encode(req->key);
+	u64(req->content_size, size);
+	return std::vector<const_buffer>(1, buffer(scratch, sizeof(packed_request) + pkt->name().serialize(scratch + sizeof(packed_request))));
+}
 
-	payload_request(content_size_t s) : size(s) {}
+std::size_t payload_request::parse(packet::ptr_t pkt, const_buffer buf)
+{
+	const packed_request* req = buffer_cast<const packed_request*>(buf);
 
-	content_size_t size;
-};
-
-
-#endif
+	pkt->source(network_key(req->key));
+	pkt->payload(boost::make_shared<payload_request>(u64(req->content_size)));
+	return sizeof(packed_request) + pkt->name().parse(buf + sizeof(packed_request));
+}

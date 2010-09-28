@@ -305,18 +305,7 @@ private:
 	std::size_t oob_threshold_size();
 	void parse_oob_threshold();
 	void update_local_threshold(boost::posix_time::time_duration duration, std::size_t bytes_sent);
-
-	void update_oob_threshold()
-	{
-#ifdef FORCE_OOB_THRESHOLD
-		oob_threshold_ = FORCE_OOB_THRESHOLD;
-#else
-		oob_threshold_ = std::min(remote_oob_threshold_, local_oob_threshold_);
-		if (oob_threshold_ < min_oob_threshold)
-			oob_threshold_ = min_oob_threshold;
-#endif
-		send_next_frame(frame_bit_oob_threshold_update);
-	}
+	void update_oob_threshold();
 
 	std::size_t successor_size();
 	void parse_successor();
@@ -344,7 +333,7 @@ private:
 
 	boost::uint32_t oob_threshold_;
 	boost::uint32_t remote_oob_threshold_;
-	boost::uint32_t local_oob_threshold_;
+	double local_oob_threshold_;
 
 	boost::uint16_t incoming_port_;
 	boost::posix_time::ptime established_;

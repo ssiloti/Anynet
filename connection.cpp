@@ -81,8 +81,7 @@ namespace
 
 connection::connection(local_node& node, routing_type rtype)
 	: node_(node)
-	, link_(node.io_service()
-	, node.context)
+	, link_(node.io_service(), node.context)
 	, routing_type_(rtype)
 	, incoming_port_(0)
 	, lifecycle_(connecting)
@@ -458,14 +457,7 @@ void connection::frame_head_received(const boost::system::error_code& error, std
 				                                    placeholders::error,
 				                                    placeholders::bytes_transferred));
 				return;
-#if 0
-			case frame_fragment:
-				{
-					::frame_fragment::ptr_t frag(new ::frame_fragment());
-					frag->receive(link_, boost::protect(boost::bind(&connection::incoming_fragment, shared_from_this(), _1, _2)));
-					return;
-				}
-#endif
+
 			default:
 				{
 					DLOG(INFO) << "Unknown frame type: " << buffer_cast<const boost::uint8_t*>(link_.received_buffer())[0];
@@ -538,11 +530,23 @@ void connection::update_local_threshold(boost::posix_time::time_duration duratio
 	// how long this operation took
 	// We cap any increase at the amount of data sent for this operation. This is to prevent
 	// the threshold from overshooting too much on lightly loaded short-thin links.
-	// FIXME: Overflow/underflow problems abound!
-	local_oob_threshold_ += std::max(std::min(int(double((target_latency.total_milliseconds() - duration.total_milliseconds()))
-	                                          / double(target_latency.total_milliseconds())
-	                                          * double(local_oob_threshold_)), int(bytes_sent)),
-	                                 -int(local_oob_threshold_));
+	local_oob_threshold_ += std::min(double((target_latency.total_milliseconds() - duration.total_milliseconds()))
+	                                 / double(target_latency.total_milliseconds()) * local_oob_threshold_,
+	                                 double(bytes_sent));
+	local_oob_threshold_ = std::max(local_oob_threshold_, 1.0);
+}
+
+void connection::update_oob_threshold()
+{
+#ifdef FORCE_OOB_THRESHOLD
+	oob_threshold_ = FORCE_OOB_THRESHOLD;
+#else
+	oob_threshold_ = std::min(remote_oob_threshold_, boost::uint32_t(local_oob_threshold_));
+	if (oob_threshold_ < min_oob_threshold)
+		oob_threshold_ = min_oob_threshold;
+#endif
+	node_.update_threshold_stats();
+	send_next_frame(frame_bit_oob_threshold_update);
 }
 
 std::size_t connection::successor_size()
@@ -623,7 +627,7 @@ void connection::send_next_frame()
 		ack_sends_needed_ -= ack_count;
 		frame->ack = ack_count;
 		frame->rsvd[0] = frame->rsvd[1] = 0;
-		u32(frame->oob_threshold, local_oob_threshold_);
+		u32(frame->oob_threshold, boost::uint32_t(local_oob_threshold_));
 		boost::asio::async_write(link_.socket,
 		                         const_buffers_1(link_.sendable_buffer()),
 		                         boost::bind(&connection::frame_sent,
@@ -671,7 +675,7 @@ void connection::send_next_frame()
 		
 #ifdef SIMULATION
 		if (send_delay_.expires_at() == boost::date_time::not_a_date_time) {
-			send_delay_.expires_from_now(boost::posix_time::milliseconds(bytes_transfered));
+			send_delay_.expires_from_now(boost::posix_time::milliseconds(bytes_transfered / 2));
 			send_delay_.async_wait(boost::bind(&connection::send_delayed_frame, shared_from_this(), placeholders::error));
 			return;
 		}
@@ -680,10 +684,7 @@ void connection::send_next_frame()
 		ack_queue_.push_back(pending_ack(packet_queue_.front().entered, bytes_transfered));
 
 		assert(buffer_cast<const boost::uint8_t*>(send_buffers[0])[0] == 0);
-		if (packet_queue_.front().pkt->content_status() == packet::content_attached) {
-			assert(buffer_cast<const boost::uint8_t*>(send_buffers[1])[0] == 0);
-			assert(buffer_size(send_buffers[1]) < 24);
-		}
+
 		DLOG(INFO) << "Sending " << bytes_transfered << " packet bytes";
 
 		boost::asio::async_write(link_.socket,
@@ -703,7 +704,7 @@ void connection::send_next_frame()
 
 #ifdef SIMULATION
 		if (send_delay_.expires_at() == boost::date_time::not_a_date_time) {
-			send_delay_.expires_from_now(boost::posix_time::milliseconds(bytes_transfered));
+			send_delay_.expires_from_now(boost::posix_time::milliseconds(bytes_transfered / 2));
 			send_delay_.async_wait(boost::bind(&connection::send_delayed_frame, shared_from_this(), placeholders::error));
 			return;
 		}

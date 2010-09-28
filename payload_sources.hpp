@@ -52,7 +52,8 @@ public:
 	virtual std::vector<const_buffer> serialize(packet::const_ptr_t pkt, std::size_t threshold, mutable_buffer scratch) const
 	{
 		packed_detached_sources* s = buffer_cast<packed_detached_sources*>(scratch);
-		int source_send_count = std::min(get()->sources.size(), (buffer_size(scratch) - sizeof(packed_detached_sources)) / sizeof(packed_source_address));
+		int source_send_count = std::min(get()->sources.size(), (threshold - sizeof(packed_detached_sources)) / sizeof(packed_source_address));
+		source_send_count = std::max(source_send_count, 1); // Always send at least one source, regardless of threshold
 		std::size_t name_size = pkt->name().serialize(scratch + sizeof(packed_detached_sources));
 
 		pkt->source().encode(s->key);

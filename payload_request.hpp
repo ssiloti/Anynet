@@ -47,10 +47,12 @@ public:
 	virtual std::vector<const_buffer> serialize(packet::const_ptr_t pkt, std::size_t threshold, mutable_buffer scratch) const;
 	static std::size_t parse(packet::ptr_t pkt, const_buffer buf);
 
-	payload_request(content_size_t s) : size(s) {}
+	payload_request(content_size_t s, content_size_t t = std::numeric_limits<content_size_t>::max())
+		: size(s), min_oob_threshold(t)
+	{}
 
 	content_size_t size;
+	content_size_t min_oob_threshold;
 };
-
 
 #endif

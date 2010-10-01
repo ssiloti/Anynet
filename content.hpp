@@ -39,7 +39,7 @@
 struct content_identifier
 {
 	content_identifier() {}
-	content_identifier(const network_key& p, const content_name n = content_name())
+	explicit content_identifier(const network_key& p, const content_name n = content_name())
 		: publisher(p), name(n)
 	{}
 

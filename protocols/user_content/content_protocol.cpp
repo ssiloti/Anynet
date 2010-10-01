@@ -65,11 +65,20 @@ void content_protocol::snoop_packet_payload(packet::ptr_t pkt)
 	{
 	case packet::content_requested:
 		{
-			const_payload_buffer_ptr content = get_content(pkt->destination());
+			const_payload_buffer_ptr content = get_content(pkt->content_id());
 
 			if (content) {
 				DLOG(INFO) << "Replying with content to request from " << std::string(pkt->source()) << " for " << std::string(pkt->destination());
-				pkt->to_reply(packet::content_attached, boost::make_shared<payload_content_buffer>(boost::ref(node_), content));
+				if (pkt->payload_as<payload_request>()->min_oob_threshold < buffer_size(content->get())) {
+					content_sources::ptr_t self_source(boost::make_shared<content_sources>(buffer_size(content->get())));
+					self_source->sources.insert(content_sources::sources_t::value_type(node_.id(), node_.public_endpoint()));
+					if (node_.is_v4())
+						pkt->to_reply(packet::content_detached, boost::make_shared<payload_content_sources_v4>(self_source));
+					else
+						pkt->to_reply(packet::content_detached, boost::make_shared<payload_content_sources_v6>(self_source));
+				}
+				else
+					pkt->to_reply(packet::content_attached, boost::make_shared<payload_content_buffer>(boost::ref(node_), content));
 				break;
 			}
 
@@ -90,19 +99,19 @@ void content_protocol::snoop_packet_payload(packet::ptr_t pkt)
 			pkt->name(cid.name);
 			if (pkt->is_direct()) {
 				hunk_desc = node_.cache_local_request(id(),
-				                                      pkt->source(),
+				                                      pkt->content_id(),
 				                                      buffer_size(pkt->payload_as<payload_content_buffer>()->payload->get()));
 			}
 			else if (pkt->source() == pkt->destination())
 				hunk_desc = node_.cache_store(id(),
-				                              pkt->source(),
+				                              pkt->content_id(),
 				                              buffer_size(pkt->payload_as<payload_content_buffer>()->payload->get()));
 			else {
 				content_requests_t::iterator recent_request = recent_requests_.find(pkt->content_id());
 				if (recent_request == recent_requests_.end() || recent_request->second[1].is_not_a_date_time())
 					break;
 				hunk_desc = node_.cache_remote_request(id(),
-				                                       pkt->source(),
+				                                       pkt->content_id(),
 				                                       buffer_size(pkt->payload_as<payload_content_buffer>()->payload->get()),
 				                                       recent_request->second[0] - recent_request->second[1]);
 			}
@@ -137,7 +146,7 @@ void content_protocol::snoop_packet_payload(packet::ptr_t pkt)
 		    && content_size <= node_.average_oob_threshold()) {
 			hunk_descriptor_t hunk_desc;
 			hunk_desc = node_.cache_remote_request(id(),
-			                                       pkt->source(),
+			                                       pkt->content_id(),
 			                                       std::size_t(content_size),
 			                                       recent_request->second[0] - recent_request->second[1]);
 			if (hunk_desc != node_.not_a_hunk()) {
@@ -287,7 +296,7 @@ void content_protocol::new_content_request(const content_identifier& key,
 		rh = response_handlers_.insert(std::make_pair(key, boost::shared_ptr<response_handler>()));
 
 	if (rh.second) {
-		rh.first->second.reset(new response_handler(node_.io_service()));
+		rh.first->second = boost::make_shared<response_handler>(boost::ref(node_.io_service()));
 		rh.first->second->timeout.async_wait(boost::bind(&content_protocol::remove_response_handler,
 		                                                 shared_from_this_as<content_protocol>(),
 		                                                 rh.first->first,
@@ -315,7 +324,7 @@ void content_protocol::new_content_store(content_identifier cid, const_payload_b
 	pkt->source(cid.publisher);
 	pkt->name(cid.name);
 	pkt->protocol(id());
-	content_sources::ptr_t self_source(new content_sources(buffer_size(hunk->get())));
+	content_sources::ptr_t self_source(boost::make_shared<content_sources>(buffer_size(hunk->get())));
 	self_source->sources.insert(std::make_pair(node_.id(), content_sources::source(node_.public_endpoint())));
 	pkt->content_status(packet::content_detached);
 	if (node_.is_v4())

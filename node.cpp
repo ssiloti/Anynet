@@ -517,6 +517,8 @@ connection::ptr_t local_node::dispatch(packet::ptr_t pkt, const network_key& inn
 
 	if (target != ib_peers_.end()) {
 		DLOG(INFO) << "Got successor peer " << std::string((*target)->remote_id());
+		// TODO: Need a hook so that protocols can define a policy for oob threshold
+		// overrides if no crumb is present
 		(*target)->send(pkt);
 		return *target;
 	}
@@ -625,7 +627,7 @@ void local_node::packet_received(connection::ptr_t con, packet::ptr_t pkt)
 					for (network_protocol::crumb::requesters_t::const_iterator requester = requesters->begin();
 						    requester != requesters->end();
 						    ++requester) {
-						if (*target == requester->second.lock()) {
+						if (*target == requester->second.con.lock()) {
 							// don't do a desperation request to the peer that originated the request
 							inner_id = (*target)->remote_id() - 1;
 							done = false;
@@ -660,9 +662,9 @@ void local_node::packet_received(connection::ptr_t con, packet::ptr_t pkt)
 				packet::ptr_t new_pkt(boost::make_shared<packet>(*pkt));
 				new_pkt->destination(requester->first);
 
-				connection::ptr_t con = requester->second.lock();
+				connection::ptr_t con = requester->second.con.lock();
 				if (con)
-					con->send(new_pkt);
+					con->send(new_pkt, requester->second.min_oob_threshold);
 				else
 					dispatch(new_pkt);
 
@@ -701,7 +703,7 @@ void local_node::packet_received(connection::ptr_t con, packet::ptr_t pkt)
 						for (network_protocol::crumb::requesters_t::const_iterator requester = requesters->begin();
 						     requester != requesters->end();
 						     ++requester) {
-							if (*target == requester->second.lock()) {
+							if (*target == requester->second.con.lock()) {
 								// don't do a desperation request to the peer that originated the request
 								inner_id = (*target)->remote_id() - 1;
 								done = false;

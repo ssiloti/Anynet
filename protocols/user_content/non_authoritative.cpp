@@ -126,7 +126,7 @@ content_identifier non_authoritative::content_id(const_payload_buffer_ptr conten
 	for (const boost::uint8_t* chunk = c->content; chunk < end_of_content ; chunk += chunk_size)
 		root_hash.update(net_hash(const_buffer(chunk, std::min(chunk_size, size_t(end_of_content - chunk)))));
 
-	return network_key(root_hash);
+	return content_identifier(network_key(root_hash));
 }
 
 void non_authoritative::store_content(hunk_descriptor_t desc, const_payload_buffer_ptr content)

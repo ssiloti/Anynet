@@ -52,11 +52,23 @@ class network_protocol : public boost::enable_shared_from_this<network_protocol>
 public:
 	struct crumb
 	{
-		typedef std::map<network_key, boost::weak_ptr<connection> > requesters_t;
+		struct requester
+		{
+			//requester(boost::weak_ptr<connection> c, content_size_t t)
+			//	: con(c), min_oob_threshold(t)
+			//{}
+
+			boost::weak_ptr<connection> con;
+			std::size_t min_oob_threshold;
+		};
+
+		typedef std::map<network_key, requester> requesters_t;
 
 		crumb(boost::asio::io_service& ios)
 			: timeout(ios)
-		{ timeout.expires_from_now(boost::posix_time::seconds(5)); }
+		{
+			timeout.expires_from_now(boost::posix_time::seconds(5));
+		}
 
 		requesters_t requesters;
 		boost::asio::deadline_timer timeout;

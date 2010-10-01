@@ -40,6 +40,7 @@ namespace
 	{
 		boost::uint8_t key[network_key::packed_size];
 		boost::uint8_t content_size[8];
+		boost::uint8_t min_oob_threshold[8];
 	};
 }
 
@@ -48,6 +49,7 @@ std::vector<const_buffer> payload_request::serialize(packet::const_ptr_t pkt, st
 	packed_request* req = buffer_cast<packed_request*>(scratch);
 	pkt->source().encode(req->key);
 	u64(req->content_size, size);
+	u64(req->min_oob_threshold, min_oob_threshold);
 	return std::vector<const_buffer>(1, buffer(scratch, sizeof(packed_request) + pkt->name().serialize(scratch + sizeof(packed_request))));
 }
 
@@ -56,6 +58,6 @@ std::size_t payload_request::parse(packet::ptr_t pkt, const_buffer buf)
 	const packed_request* req = buffer_cast<const packed_request*>(buf);
 
 	pkt->source(network_key(req->key));
-	pkt->payload(boost::make_shared<payload_request>(u64(req->content_size)));
+	pkt->payload(boost::make_shared<payload_request>(u64(req->content_size), u64(req->min_oob_threshold)));
 	return sizeof(packed_request) + pkt->name().parse(buf + sizeof(packed_request));
 }

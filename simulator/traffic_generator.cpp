@@ -72,7 +72,7 @@ void traffic_generator::tick(int time)
 			sim.begin_query();
 			DLOG(INFO) << "Node id=" << std::string(node_.id()) << " Requesting non-authoritative hunk id=" << std::string(hunk_id);
 			non_authoritative& non_auth = node_.protocol<non_authoritative>();
-			non_auth.retrieve_hunk(hunk_id, boost::protect(boost::bind(&traffic_generator::hunk_received, this, _1)));
+			non_auth.retrieve_hunk(content_identifier(hunk_id), boost::protect(boost::bind(&traffic_generator::hunk_received, this, _1)));
 		}
 		next_non_authoritative_get_ = sim.get_non_authoritative_interval();
 	}

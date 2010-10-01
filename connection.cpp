@@ -345,9 +345,9 @@ void connection::complete_connection(const boost::system::error_code& error, std
 	receive_next_frame();
 }
 
-void connection::send(packet::ptr_t pkt)
+void connection::send(packet::ptr_t pkt, std::size_t oob_threshold_override)
 {
-	packet_queue_.push_back(pkt);
+	packet_queue_.push_back(queued_packet(pkt, oob_threshold_override));
 
 	if (!outstanding_non_packet_frames_ && packet_queue_.size() == 1 && frame_queue_.empty() && lifecycle_ == connected) {
 		send_next_frame();
@@ -356,9 +356,9 @@ void connection::send(packet::ptr_t pkt)
 		DLOG(INFO) << "Queued packet from " << std::string(node_.id()) << " to " << std::string(remote_id());
 }
 
-void connection::send(protocol_frame::ptr_t frame)
+void connection::send(protocol_frame::ptr_t frame, std::size_t oob_threshold_override)
 {
-	frame_queue_.push_back(frame);
+	frame_queue_.push_back(queued_protocol_frame(frame, oob_threshold_override));
 
 	if (!outstanding_non_packet_frames_ && packet_queue_.empty() && frame_queue_.size() == 1 && lifecycle_ == connected)
 		send_next_frame();
@@ -668,7 +668,12 @@ void connection::send_next_frame()
 	else if (!packet_queue_.empty()) {
 		DLOG(INFO) << "Sending packet from " << std::string(node_.id()) << " to " << std::string(remote_id());
 
-		const std::vector<const_buffer>& send_buffers = packet_queue_.front().pkt->serialize(oob_threshold(), link_.send_buffer());
+		std::size_t threshold
+			= packet_queue_.front().oob_threshold_override == std::numeric_limits<std::size_t>::max()
+			? oob_threshold() : packet_queue_.front().oob_threshold_override;
+
+		const std::vector<const_buffer>& send_buffers = packet_queue_.front().pkt->serialize(threshold, link_.send_buffer());
+
 		std::size_t bytes_transfered = 0;
 		for (std::vector<const_buffer>::const_iterator buf = send_buffers.begin(); buf != send_buffers.end(); ++buf)
 			bytes_transfered += buffer_size(*buf);
@@ -697,7 +702,12 @@ void connection::send_next_frame()
 	else if (!frame_queue_.empty()) {
 		DLOG(INFO) << "Sending fragment from " << std::string(node_.id()) << " to " << std::string(remote_id());
 
-		const std::vector<const_buffer>& send_buffers = frame_queue_.front().frame->serialize(oob_threshold(), link_.send_buffer());
+		std::size_t threshold
+			= frame_queue_.front().oob_threshold_override == std::numeric_limits<std::size_t>::max()
+			? oob_threshold() : packet_queue_.front().oob_threshold_override;
+
+		const std::vector<const_buffer>& send_buffers = frame_queue_.front().frame->serialize(threshold, link_.send_buffer());
+
 		std::size_t bytes_transfered = 0;
 		for (std::vector<const_buffer>::const_iterator buf = send_buffers.begin(); buf != send_buffers.end(); ++buf)
 			bytes_transfered += buffer_size(*buf);

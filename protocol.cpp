@@ -80,12 +80,22 @@ void network_protocol::receive_payload(connection::ptr_t con, packet::ptr_t pkt,
 
 void network_protocol::to_content_location_failure(packet::ptr_t pkt)
 {
-	pkt->to_reply(packet::content_failure, boost::make_shared<const payload_failure>(pkt->payload_as<payload_request>()->size));
+	pkt->to_reply(packet::content_failure, boost::make_shared<payload_failure>(pkt->payload_as<payload_request>()->size));
 }
 
 void network_protocol::request_from_location_failure(packet::ptr_t pkt)
 {
-	pkt->to_reply(packet::content_requested, boost::make_shared<const payload_request>(pkt->payload_as<payload_failure>()->size));
+	crumbs_t::const_iterator crumb = crumbs_.find(pkt->content_id());
+
+	std::size_t min_oob_threshold = 0;
+
+	if (crumb != crumbs_.end()) {
+		crumb::requesters_t::const_iterator requester = crumb->second->requesters.find(pkt->destination());
+		if (requester != crumb->second->requesters.end())
+			min_oob_threshold = requester->second.min_oob_threshold;
+	}
+
+	pkt->to_reply(packet::content_requested, boost::make_shared<payload_request>(pkt->payload_as<payload_failure>()->size, min_oob_threshold));
 }
 
 void network_protocol::register_handler()
@@ -136,10 +146,16 @@ void network_protocol::drop_crumb(packet::ptr_t pkt, boost::weak_ptr<connection>
 	}
 
 	std::pair<crumb::requesters_t::iterator, bool>
-		requester_entry = crumb_entry.first->second->requesters.insert(std::make_pair(pkt->requester(), con));
+		requester_entry = crumb_entry.first->second->requesters.insert(std::make_pair(pkt->requester(), crumb::requester()));
+
 	// even if there already was an entry for this requester,
 	// update the connection pointer to point to the most recent request
-	requester_entry.first->second = con;
+	requester_entry.first->second.con = con;
+
+	boost::shared_ptr<payload_request> request(pkt->payload_as<payload_request>());
+	request->min_oob_threshold = std::min(request->min_oob_threshold, content_size_t(con.lock()->local_oob_threshold()));
+
+	requester_entry.first->second.min_oob_threshold = std::size_t(request->min_oob_threshold);
 
 	DLOG(INFO) << std::string(node_.id()) << " Dropping crmumb id "
 	           << std::string(pkt->content_id().publisher) << ", " << std::string(pkt->requester()) << " source " << std::string(con.lock()->remote_id());

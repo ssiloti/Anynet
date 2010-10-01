@@ -73,7 +73,7 @@ protected:
 
 class connection : public boost::enable_shared_from_this<connection>, boost::noncopyable
 {
-	const static int min_oob_threshold = 0;
+	const static std::size_t min_oob_threshold = 0;
 	const static boost::posix_time::millisec target_latency;
 public:
 	typedef boost::shared_ptr<connection> ptr_t;
@@ -114,11 +114,13 @@ public:
 	ip::tcp::endpoint remote_endpoint() const;
 	ip::address reported_node_address() const { return reported_peer_address_; }
 	std::size_t oob_threshold() const         { return oob_threshold_; }
+	std::size_t remote_oob_threshold() const  { return remote_oob_threshold_; }
+	std::size_t local_oob_threshold() const   { return std::size_t(local_oob_threshold_); }
 	bool accepts_ib_traffic() const           { return routing_type_ & 0x01; }
 	bool is_connected() const                 { return lifecycle_ == connected; }
 	boost::posix_time::time_duration age()    { return boost::posix_time::second_clock::universal_time() - established_; }
 
-	bool is_transfer_outstanding() const
+bool is_transfer_outstanding() const
 	{
 		return receive_outstanding_ || outstanding_non_packet_frames_ || !packet_queue_.empty() || !frame_queue_.empty();
 	}
@@ -146,8 +148,8 @@ public:
 
 	void disconnect();
 
-	void send(packet::ptr_t pkt);
-	void send(protocol_frame::ptr_t frame);
+	void send(packet::ptr_t pkt, std::size_t oob_threshold_override = std::numeric_limits<std::size_t>::max());
+	void send(protocol_frame::ptr_t frame, std::size_t oob_threshold_override = std::numeric_limits<std::size_t>::max());
 
 	template <typename Handler>
 	void receive_payload(std::size_t payload_size, Handler handler)
@@ -237,16 +239,28 @@ private:
 private:
 	struct queued_packet
 	{
-		queued_packet(packet::ptr_t p) : pkt(p), entered(boost::posix_time::microsec_clock::universal_time()) {}
+		queued_packet(packet::ptr_t p, std::size_t o)
+			: pkt(p)
+			, entered(boost::posix_time::microsec_clock::universal_time())
+			, oob_threshold_override(o)
+		{}
+
 		packet::ptr_t pkt;
 		boost::posix_time::ptime entered;
+		std::size_t oob_threshold_override;
 	};
 
 	struct queued_protocol_frame
 	{
-		queued_protocol_frame(boost::shared_ptr<protocol_frame> f) : frame(f), entered(boost::posix_time::microsec_clock::universal_time()) {}
+		queued_protocol_frame(boost::shared_ptr<protocol_frame> f, std::size_t o)
+			: frame(f)
+			, entered(boost::posix_time::microsec_clock::universal_time())
+			, oob_threshold_override(o)
+		{}
+
 		boost::shared_ptr<protocol_frame> frame;
 		boost::posix_time::ptime entered;
+		std::size_t oob_threshold_override;
 	};
 
 	struct pending_ack

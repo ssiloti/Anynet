@@ -77,7 +77,7 @@ class packet : public boost::enable_shared_from_this<packet>, public content_fra
 public:
 	typedef boost::shared_ptr<packet> ptr_t;
 	typedef boost::shared_ptr<const packet> const_ptr_t;
-	typedef boost::shared_ptr<const sendable_payload> payload_ptr_t;
+	typedef boost::shared_ptr<sendable_payload> payload_ptr_t;
 
 	enum content_status_t
 	{
@@ -154,6 +154,8 @@ public:
 	const sendable_payload* payload() const { return payload_.get(); }
 	template <typename Payload>
 	boost::shared_ptr<const Payload> payload_as() const { return boost::dynamic_pointer_cast<const Payload>(payload_); }
+	template <typename Payload>
+	boost::shared_ptr<Payload> payload_as() { return boost::dynamic_pointer_cast<Payload>(payload_); }
 	void payload(payload_ptr_t p) { payload_ = p; }
 
 protected:

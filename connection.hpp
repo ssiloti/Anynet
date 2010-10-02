@@ -49,7 +49,7 @@
 #include <boost/utility.hpp>
 #include <deque>
 
-#define FORCE_OOB_THRESHOLD 8000
+//#define FORCE_OOB_THRESHOLD 8000
 
 class local_node;
 class connection;

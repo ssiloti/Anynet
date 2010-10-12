@@ -114,8 +114,7 @@ namespace
 
 local_node::local_node(boost::asio::io_service& io_service, client_config& config)
 	: config_(config)
-	, acceptor_(io_service, ip::tcp::endpoint(ip::address::from_string(config.listen_ip())
-	, config.listen_port()))
+	, acceptor_(io_service, ip::tcp::endpoint(ip::address::from_string(config.listen_ip()), config.listen_port()))
 	, public_endpoint_(acceptor_.local_endpoint())
 	, created_(boost::posix_time::second_clock::universal_time())
 	, stored_size_(0)
@@ -752,7 +751,7 @@ void local_node::incoming_protocol_frame(connection::ptr_t con, protocol_id prot
 		return;
 	}
 
-	protocol_handler->incoming_frame(con, frame_type);
+//	protocol_handler->incoming_frame(con, frame_type);
 }
 
 void local_node::recompute_identity()

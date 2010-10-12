@@ -33,10 +33,12 @@
 
 #include "traffic_generator.hpp"
 #include "simulator.hpp"
+#include <transports/trivial/trivial_transport.hpp>
 #include <protocols/user_content/non_authoritative.hpp>
 #include <protocols/indirect_credit.hpp>
 #include <peer_cache.hpp>
 #include <boost/bind/protect.hpp>
+#include <boost/make_shared.hpp>
 
 traffic_generator::traffic_generator(boost::asio::io_service& io_service, int id)
 	: config_(id)
@@ -46,7 +48,10 @@ traffic_generator::traffic_generator(boost::asio::io_service& io_service, int id
 	, death_(sim.node_lifetime())
 {
 	peer_cache.add_peer(ip::tcp::endpoint(ip::address::from_string("127.0.0.1"), config_.listen_port()));
-	non_authoritative::create(node_);
+
+	boost::shared_ptr<transport::trivial> trivial_transport(boost::make_shared<transport::trivial>(boost::ref(node_)));
+	trivial_transport->start();
+	non_authoritative::create(node_, trivial_transport);
 	indirect_credit::create(node_);
 }
 

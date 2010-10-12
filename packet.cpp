@@ -46,6 +46,7 @@ namespace
 		boost::uint8_t status;
 		boost::uint8_t protocol[2];
 		boost::uint8_t destination[network_key::packed_size];
+		boost::uint8_t reserved[4];
 		boost::uint8_t payload_size[8];
 	};
 }

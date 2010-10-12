@@ -42,6 +42,7 @@
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/placeholders.hpp>
 #include <boost/asio/buffer.hpp>
+#include <boost/detail/endian.hpp>
 #include <boost/cstdint.hpp>
 #include <vector>
 
@@ -55,6 +56,11 @@ using boost::asio::mutable_buffers_1;
 using boost::asio::buffer_cast;
 using boost::asio::buffer_size;
 using boost::asio::buffer;
+
+using boost::uint8_t;
+using boost::uint16_t;
+using boost::uint32_t;
+using boost::uint64_t;
 
 template <typename Addr>
 inline Addr to(ip::address a)
@@ -72,6 +78,38 @@ template <>
 inline ip::address_v6 to<ip::address_v6>(ip::address a)
 {
 	return a.to_v6();
+}
+
+template <typename I>
+inline I hton(I i)
+{
+	return I::hton(i);
+}
+
+template <>
+inline boost::uint16_t hton(boost::uint16_t i)
+{
+	return htons(i);
+}
+
+template <>
+inline boost::uint32_t hton(boost::uint32_t i)
+{
+	return htonl(i);
+}
+
+template <>
+inline boost::uint64_t hton(boost::uint64_t i)
+{
+#ifdef BOOST_LITTLE_ENDIAN
+	#ifdef BOOST_MSVC
+	return _byteswap_uint64(i);
+	#else
+	return bswap_64(i);
+	#endif
+#else
+	return i;
+#endif
 }
 
 class net_link

@@ -34,15 +34,15 @@
 #ifndef USER_CONTENT_REQUEST_HPP
 #define USER_CONTENT_REQUEST_HPP
 
-#include "fragmented_content.hpp"
+#include "transports/trivial/trivial_transport.hpp"
 #include <protocol.hpp>
 #include <packet.hpp>
 #include <core.hpp>
 
-class local_node;
-
 namespace user_content
 {
+
+class content_protocol;
 
 class content_request
 {
@@ -52,24 +52,24 @@ public:
 	content_request(const keyed_handler_t& handler) : receiving_content_(false), direct_request_pending_(false) { add_handler(handler); }
 	content_request() : receiving_content_(false), direct_request_pending_(false) {}
 
-	bool snoop_packet(local_node& node, packet::ptr_t pkt);
-	const_payload_buffer_ptr snoop_fragment(local_node& node, const network_key& src, boost::shared_ptr<frame_fragment> frag);
-	void add_handler(const keyed_handler_t& handler) { handlers_.push_back(handler); }
-	bool timeout(local_node& node, packet::ptr_t pkt);
-
 	void initiate_request(protocol_id protocol, const content_identifier& key, local_node& node, content_size_t content_size);
 
-	framented_content::fragment_buffer get_fragment_buffer(std::size_t offset, std::size_t size);
+	bool snoop_packet(content_protocol& manager, packet::ptr_t pkt);
+	void add_handler(const keyed_handler_t& handler) { handlers_.push_back(handler); }
+
+	bool timeout(content_protocol& manager, packet::ptr_t pkt);
+
+	void direct_request_failure()
+	{
+		direct_request_pending_ = false;
+	}
 
 private:
 	content_size_t content_size_;
 	std::vector<keyed_handler_t> handlers_;
-	boost::shared_ptr<content_sources> sources_;
 	bool direct_request_pending_;
-	network_key direct_request_peer_;
-	boost::optional<framented_content> partial_content_;
-	network_key last_indirect_request_peer_;
 	bool receiving_content_;
+	network_key last_indirect_request_peer_;
 };
 
 }

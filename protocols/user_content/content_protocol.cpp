@@ -45,8 +45,8 @@
 
 using namespace user_content;
 
-content_protocol::content_protocol(local_node& node, protocol_id p)
-	: network_protocol(node, p)
+content_protocol::content_protocol(local_node& node, protocol_id p, ip::tcp::endpoint public_endpoint)
+	: network_protocol(node, p), public_transport_endpoint_(public_endpoint)
 {}
 
 void content_protocol::to_content_location_failure(packet::ptr_t pkt)
@@ -69,16 +69,10 @@ void content_protocol::snoop_packet_payload(packet::ptr_t pkt)
 
 			if (content) {
 				DLOG(INFO) << "Replying with content to request from " << std::string(pkt->source()) << " for " << std::string(pkt->destination());
-				if (pkt->payload_as<payload_request>()->min_oob_threshold < buffer_size(content->get())) {
-					content_sources::ptr_t self_source(boost::make_shared<content_sources>(buffer_size(content->get())));
-					self_source->sources.insert(content_sources::sources_t::value_type(node_.id(), node_.public_endpoint()));
-					if (node_.is_v4())
-						pkt->to_reply(packet::content_detached, boost::make_shared<payload_content_sources_v4>(self_source));
-					else
-						pkt->to_reply(packet::content_detached, boost::make_shared<payload_content_sources_v6>(self_source));
-				}
+				if (pkt->payload_as<payload_request>()->min_oob_threshold < buffer_size(content->get()))
+					pkt->to_reply(packet::content_detached, self_source(buffer_size(content->get())));
 				else
-					pkt->to_reply(packet::content_attached, boost::make_shared<payload_content_buffer>(boost::ref(node_), content));
+					pkt->to_reply(packet::content_attached, boost::make_shared<payload_content_buffer>(boost::ref(*this), content));
 				break;
 			}
 
@@ -94,7 +88,7 @@ void content_protocol::snoop_packet_payload(packet::ptr_t pkt)
 	case packet::content_attached:
 		{
 			hunk_descriptor_t hunk_desc;
-			content_identifier cid(content_id(pkt->payload_as<payload_content_buffer>()->payload));
+			content_identifier cid(content_id(pkt->payload_as<payload_content_buffer>()->payload->get()));
 			pkt->source(cid.publisher);
 			pkt->name(cid.name);
 			if (pkt->is_direct()) {
@@ -169,7 +163,7 @@ void content_protocol::snoop_packet_payload(packet::ptr_t pkt)
 		response_handlers_t::iterator keyed_handler = response_handlers_.find(pkt->content_id());
 
 		if (keyed_handler != response_handlers_.end()) {
-			if (keyed_handler->second->request.snoop_packet(node_, pkt)) {
+			if (keyed_handler->second->request.snoop_packet(*this, pkt)) {
 				response_handlers_.erase(keyed_handler);
 			}
 			else {
@@ -184,61 +178,42 @@ void content_protocol::snoop_packet_payload(packet::ptr_t pkt)
 	}
 }
 
-void content_protocol::snoop_fragment(const network_key& src, frame_fragment::ptr_t frag)
+void content_protocol::content_finished(const content_identifier& cid, const_payload_buffer_ptr content)
 {
-	if (!frag->is_request()) {
-		response_handlers_t::iterator request = response_handlers_.find(frag->id());
+	response_handlers_t::iterator request = response_handlers_.find(cid);
 
-		if (request != response_handlers_.end()) {
-			const_payload_buffer_ptr payload = request->second->request.snoop_fragment(node_, src, frag);
+	if (request != response_handlers_.end()) {
+		boost::shared_ptr<packet> pkt(boost::make_shared<packet>());
+		pkt->source(cid.publisher);
+		pkt->destination(node_.id());
+		pkt->name(cid.name);
+		if (content) {
+			pkt->content_status(packet::content_attached);
+			pkt->payload(boost::make_shared<payload_content_buffer>(boost::ref(*this), content));
+		}
+		else {
+			pkt->content_status(packet::content_failure);
+			pkt->payload(boost::make_shared<payload_failure>(0));
+			request->second->request.direct_request_failure();
+		}
 
-			if (payload) {
-				packet::ptr_t pkt(new packet());
-				pkt->protocol(id());
-				pkt->content_status(packet::content_attached);
-				pkt->mark_direct();
-				pkt->destination(node_.id());
-				pkt->name(frag->id().name);
-				pkt->payload(boost::make_shared<payload_content_buffer>(boost::ref(node_), payload));
-				snoop_packet(pkt);
-				return;
-			}
-			else if (frag->status() == frame_fragment::status_failed) {
-				packet::ptr_t pkt(new packet());
-				pkt->protocol(id());
-				pkt->content_status(packet::content_failure);
-				pkt->source(frag->id().publisher);
-				pkt->name(frag->id().name);
-				pkt->destination(node_.id());
-				pkt->payload(boost::make_shared<payload_failure>(0));
-				if (request->second->request.snoop_packet(node_, pkt)) {
-					response_handlers_.erase(request);
-					return;
-				}
-			}
-
+		if (request->second->request.snoop_packet(*this, pkt))
+			response_handlers_.erase(request);
+		else {
 			// any time there's some activity on the request we reset the timeout
-			request->second->timeout.expires_from_now(boost::posix_time::seconds(5));
+			request->second->timeout.expires_from_now(boost::posix_time::seconds(15));
 			request->second->timeout.async_wait(boost::bind(&content_protocol::remove_response_handler,
 			                                                shared_from_this_as<content_protocol>(),
 			                                                request->first,
 			                                                placeholders::error));
 		}
 	}
-	else {
-		const_payload_buffer_ptr content = get_content(frag->id());
-
-		if (content)
-			frag->to_reply(content);
-		else
-			frag->to_reply();
-	}
 }
 
 void content_protocol::receive_attached_content(connection::ptr_t con, packet::ptr_t pkt, std::size_t payload_size)
 {
 	payload_buffer_ptr payload_buffer(get_payload_buffer(payload_size));
-	pkt->payload(boost::make_shared<payload_content_buffer>(boost::ref(node_), payload_buffer));
+	pkt->payload(boost::make_shared<payload_content_buffer>(boost::ref(*this), payload_buffer));
 	con->receive_payload(std::vector<mutable_buffer>(1,
 	                                                 payload_buffer->get()),
 	                                                 boost::protect(boost::bind(&content_protocol::content_received, this, con, pkt)));
@@ -247,45 +222,6 @@ void content_protocol::receive_attached_content(connection::ptr_t con, packet::p
 void content_protocol::content_received(connection::ptr_t con, packet::ptr_t pkt)
 {
 	node_.packet_received(con, pkt);
-}
-
-void content_protocol::incoming_frame(connection::ptr_t con, boost::uint8_t frame_type)
-{
-	switch (frame_type)
-	{
-	case frame_type_fragment:
-		{
-			frame_fragment::ptr_t frag(boost::make_shared<frame_fragment>(id()));
-			con->receive_payload(frag,
-			                     shared_from_this_as<content_protocol>(),
-			                     boost::protect(boost::bind(&content_protocol::fragment_received,
-			                                                shared_from_this_as<content_protocol>(),
-			                                                con,
-			                                                frag)));
-			break;
-		}
-	default:node_.receive_failure(con);break;
-	}
-}
-
-void content_protocol::fragment_received(connection::ptr_t con, boost::shared_ptr<frame_fragment> frag)
-{
-	con->send_ack();
-	// FIXME: This is ugly, there must be a better way to send the reply
-	frame_fragment::fragment_status old_status = frag->status();
-	snoop_fragment(con->remote_id(), frag);
-	if (old_status == frame_fragment::status_requested && old_status != frag->status())
-		node_.direct_request(con->remote_endpoint(), frag);
-}
-
-framented_content::fragment_buffer content_protocol::get_fragment_buffer(frame_fragment::ptr_t frag)
-{
-	response_handlers_t::iterator request = response_handlers_.find(frag->id());
-
-	if (request != response_handlers_.end())
-		return request->second->request.get_fragment_buffer(frag->offset(), frag->size());
-	else
-		return framented_content::fragment_buffer(frag->offset());
 }
 
 void content_protocol::new_content_request(const content_identifier& key,
@@ -324,14 +260,19 @@ void content_protocol::new_content_store(content_identifier cid, const_payload_b
 	pkt->source(cid.publisher);
 	pkt->name(cid.name);
 	pkt->protocol(id());
-	content_sources::ptr_t self_source(boost::make_shared<content_sources>(buffer_size(hunk->get())));
-	self_source->sources.insert(std::make_pair(node_.id(), content_sources::source(node_.public_endpoint())));
 	pkt->content_status(packet::content_detached);
-	if (node_.is_v4())
-		pkt->payload(boost::make_shared<payload_content_sources_v4>(self_source));
-	else
-		pkt->payload(boost::make_shared<payload_content_sources_v6>(self_source));
+	pkt->payload(self_source(buffer_size(hunk->get())));
 	node_.local_request(pkt);
+}
+
+packet::payload_ptr_t content_protocol::self_source(std::size_t content_size)
+{
+	content_sources::ptr_t self(boost::make_shared<content_sources>(content_size));
+	self->sources.insert(std::make_pair(node_.id(), content_sources::source(public_transport_endpoint_)));
+	if (node_.is_v4())
+		return boost::make_shared<payload_content_sources_v4>(self);
+	else
+		return boost::make_shared<payload_content_sources_v6>(self);
 }
 
 void content_protocol::remove_response_handler(content_identifier key, const boost::system::error_code& error)
@@ -348,7 +289,7 @@ void content_protocol::remove_response_handler(content_identifier key, const boo
 			pkt->name(key.name);
 			pkt->destination(node_.id());
 			pkt->payload(boost::make_shared<payload_failure>(0));
-			if (iter->second->request.timeout(node_, pkt))
+			if (iter->second->request.timeout(*this, pkt))
 				// request has nothing more to do, put him out of his misery
 				response_handlers_.erase(iter);
 			else {

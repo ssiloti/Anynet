@@ -96,6 +96,21 @@ public:
 		return total_size;
 	}
 
+	std::size_t serialize(uint8_t* dest)
+	{
+		std::size_t total_size = 1;
+
+		*dest++ = components_.size();
+		for (components_t::const_iterator comp = components_.begin(); comp != components_.end(); ++comp) {
+			*dest = comp->size();
+			std::memcpy(++dest, comp->data(), comp->size());
+			dest += comp->size();
+			total_size += comp->size();
+		}
+
+		return total_size;
+	}
+
 	std::size_t parse(const_buffer buf)
 	{
 		const boost::uint8_t* cursor = buffer_cast<const boost::uint8_t*>(buf);
@@ -109,6 +124,21 @@ public:
 		}
 
 		return std::size_t(cursor - buffer_cast<const boost::uint8_t*>(buf));
+	}
+
+	std::size_t parse(const boost::uint8_t* buf)
+	{
+		const boost::uint8_t* cursor = buf;
+
+		components_.resize(*cursor++);
+
+		for (components_t::iterator comp = components_.begin(); comp != components_.end(); ++comp) {
+			comp->resize(*cursor);
+			std::memcpy(comp->data(), cursor + 1, *cursor);
+			cursor += *cursor + 1;
+		}
+
+		return std::size_t(cursor - buf);
 	}
 
 private:

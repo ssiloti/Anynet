@@ -31,41 +31,9 @@
 //
 // Contact:  Steven Siloti <ssiloti@gmail.com>
 
-#ifndef USER_CONTENT_PAYLOAD_CONTENT_BUFFER_HPP
-#define USER_CONTENT_PAYLOAD_CONTENT_BUFFER_HPP
+#ifndef TRANSPORTS_HTTP_SERVER_HPP
+#define TRANSPORTS_HTTP_SERVER_HPP
 
-#include "packet.hpp"
-#include "core.hpp"
 
-namespace user_content
-{
-
-class content_protocol;
-
-class payload_content_buffer : public sendable_payload
-{
-public:
-	virtual content_size_t content_size() const
-	{
-		return buffer_size(payload->get());
-	}
-
-	virtual boost::shared_ptr<const packet> trim(boost::shared_ptr<const packet> pkt, std::size_t threshold) const;
-
-	virtual std::vector<const_buffer> serialize(boost::shared_ptr<const packet> pkt, std::size_t threshold, mutable_buffer scratch) const
-	{
-		assert(buffer_size(payload->get()) <= threshold);
-		return std::vector<const_buffer>(1, payload->get());
-	}
-
-	payload_content_buffer(content_protocol& origin, const_payload_buffer_ptr p) : origin_(origin), payload(p) {}
-
-	const_payload_buffer_ptr payload;
-
-private:
-	content_protocol& origin_;
-};
-
-}
 
 #endif

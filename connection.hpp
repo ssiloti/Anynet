@@ -120,7 +120,7 @@ public:
 	bool is_connected() const                 { return lifecycle_ == connected; }
 	boost::posix_time::time_duration age()    { return boost::posix_time::second_clock::universal_time() - established_; }
 
-bool is_transfer_outstanding() const
+	bool is_transfer_outstanding() const
 	{
 		return receive_outstanding_ || outstanding_non_packet_frames_ || !packet_queue_.empty() || !frame_queue_.empty();
 	}
@@ -282,7 +282,7 @@ private:
 	};
 
 	const_buffer generate_handshake();
-	bool parse_handshake();
+//	bool parse_handshake();
 	void redispatch_send_queue();
 
 	void frame_head_received(const boost::system::error_code& error, std::size_t bytes_transfered);

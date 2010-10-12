@@ -33,6 +33,7 @@
 
 #include "protocols/user_content/non_authoritative.hpp"
 #include "node.hpp"
+#include <boost/make_shared.hpp>
 
 namespace
 {
@@ -44,11 +45,12 @@ namespace
 	};
 }
 
-void non_authoritative::create(local_node& node)
+void non_authoritative::create(local_node& node, boost::shared_ptr<transport::trivial> t)
 {
-	boost::shared_ptr<non_authoritative> ptr(new non_authoritative(node));
+	boost::shared_ptr<non_authoritative> ptr(boost::make_shared<non_authoritative>(boost::ref(node), t));
 	ptr->register_handler();
 	ptr->start_vacume();
+	ptr->transport_->register_upper_layer(ptr->id(), ptr);
 }
 
 non_authoritative::insert_buffer::insert_buffer(mapped_content::ptr b)
@@ -78,9 +80,10 @@ const_buffer non_authoritative::insert_buffer::get() const
 	return backing->get() + sizeof(packed_content);
 }
 
-non_authoritative::non_authoritative(local_node& node)
-	: user_content::content_protocol(node, protocol_id)
+non_authoritative::non_authoritative(local_node& node, boost::shared_ptr<transport::trivial> t)
+	: user_content::content_protocol(node, protocol_id, t->public_endpoint())
 	, stored_hunks_(node.config().content_store_path() + "/non_authoritative", protocol_id, node)
+	, transport_(t)
 {}
 
 non_authoritative::insert_buffer non_authoritative::get_insertion_buffer(std::size_t size)
@@ -90,7 +93,7 @@ non_authoritative::insert_buffer non_authoritative::get_insertion_buffer(std::si
 
 content_identifier non_authoritative::insert_hunk(insert_buffer hunk)
 {
-	content_identifier cid(content_id(hunk.backing));
+	content_identifier cid(content_id(hunk.backing->get()));
 	// Since the user is requesting an insertion while providing just a buffer, we need to make sure the
 	// content gets inserted into the local store so we can serve it up to requesters
 	hunk_descriptor_t hunk_desc = node_.cache_local_request(id(), cid, buffer_size(hunk.backing->get()));
@@ -105,20 +108,20 @@ const_payload_buffer_ptr non_authoritative::get_content(const content_identifier
 	return stored_hunks_.get(key);
 }
 
-content_identifier non_authoritative::content_id(const_payload_buffer_ptr content)
+content_identifier non_authoritative::content_id(const_buffer content)
 {
-	const packed_content* c = buffer_cast<const packed_content*>(content->get());
+	const packed_content* c = buffer_cast<const packed_content*>(content);
 
 	if (c->chunk_size >= sizeof(std::size_t))
 		throw bad_content();
 
-	std::size_t chunk_size = c->chunk_size & sizeof(std::size_t) - 1;
+	std::size_t chunk_size = c->chunk_size & sizeof(std::size_t) * 8 - 1;
 	if (chunk_size == 0)
 		chunk_size = std::numeric_limits<std::size_t>::max();
 	else
 		chunk_size = 1 << chunk_size;
 
-	std::size_t content_size = buffer_size(content->get()) - sizeof(packed_content);
+	std::size_t content_size = buffer_size(content) - sizeof(packed_content);
 	chunk_size = std::min(chunk_size, content_size);
 	const boost::uint8_t* end_of_content = c->content + content_size;
 
@@ -129,6 +132,16 @@ content_identifier non_authoritative::content_id(const_payload_buffer_ptr conten
 	return content_identifier(network_key(root_hash));
 }
 
+void non_authoritative::start_direct_request(const content_identifier& cid, boost::shared_ptr<content_sources> sources)
+{
+	transport_->start_request(node_, id(), cid, sources);
+}
+
+void non_authoritative::stop_direct_request(const content_identifier& cid)
+{
+	transport_->stop_request(id(), cid);
+}
+
 void non_authoritative::store_content(hunk_descriptor_t desc, const_payload_buffer_ptr content)
 {
 	stored_hunks_.put(desc, std::vector<const_buffer>(1, content->get()));
@@ -137,4 +150,3 @@ void non_authoritative::store_content(hunk_descriptor_t desc, const_payload_buff
 	sim.stored_non_authoritative_hunk(desc->id.publisher);
 #endif
 }
-

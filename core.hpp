@@ -48,6 +48,7 @@
 #include <set>
 
 typedef boost::uint16_t protocol_id;
+typedef boost::uint8_t transport_id;
 typedef boost::uint64_t content_size_t;
 
 enum defined_protocols

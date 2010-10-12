@@ -25,6 +25,21 @@
     <Filter Include="Source Files\Protocols\User Content">
       <UniqueIdentifier>{8d57990e-afe3-4458-bd61-ffd9b33dfedc}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Header Files\Transports">
+      <UniqueIdentifier>{fa0aaa1e-50c0-4819-9038-8771da019601}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Transports\HTTP">
+      <UniqueIdentifier>{298aff9b-c09b-44c2-bb0a-5d1cc5f80805}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Transports\Trivial">
+      <UniqueIdentifier>{91d78c47-b4f4-486f-8270-b222bd29943d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Transports">
+      <UniqueIdentifier>{2c038312-66fd-48aa-81ed-a70fa0629dd5}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Transports\Trivial">
+      <UniqueIdentifier>{aece4836-b69b-4dc5-a6f9-f6b4b1855efb}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\authority.hpp">
@@ -114,6 +129,24 @@
     <ClInclude Include="..\payload_sources.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="..\transport.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\transports\http\server.hpp">
+      <Filter>Header Files\Transports\HTTP</Filter>
+    </ClInclude>
+    <ClInclude Include="..\transports\http\message.hpp">
+      <Filter>Header Files\Transports\HTTP</Filter>
+    </ClInclude>
+    <ClInclude Include="..\transports\http\version.hpp">
+      <Filter>Header Files\Transports\HTTP</Filter>
+    </ClInclude>
+    <ClInclude Include="..\transports\http\headers.hpp">
+      <Filter>Header Files\Transports\HTTP</Filter>
+    </ClInclude>
+    <ClInclude Include="..\transports\trivial\trivial_transport.hpp">
+      <Filter>Header Files\Transports\Trivial</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\authority.cpp">
@@ -178,6 +211,9 @@
     </ClCompile>
     <ClCompile Include="..\payload_request.cpp">
       <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\transports\trivial\trivial_transport.cpp">
+      <Filter>Source Files\Transports\Trivial</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

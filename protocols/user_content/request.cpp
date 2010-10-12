@@ -32,8 +32,8 @@
 // Contact:  Steven Siloti <ssiloti@gmail.com>
 
 #include "payload_content_buffer.hpp"
+#include "content_protocol.hpp"
 #include "request.hpp"
-#include "fragment.hpp"
 #include <payload_request.hpp>
 #include <node.hpp>
 #include <boost/make_shared.hpp>
@@ -48,7 +48,7 @@ void content_request::initiate_request(protocol_id protocol,
 	last_indirect_request_peer_ = node.id();
 	content_size_ = content_size;
 
-	packet::ptr_t pkt(new packet());
+	packet::ptr_t pkt(boost::make_shared<packet>());
 	pkt->protocol(protocol);
 	pkt->source(node.id());
 	pkt->destination(key.publisher);
@@ -62,48 +62,40 @@ void content_request::initiate_request(protocol_id protocol,
 		last_indirect_request_peer_ = con->remote_id() - 1;
 }
 
-bool content_request::snoop_packet(local_node& node, packet::ptr_t pkt)
+bool content_request::snoop_packet(content_protocol& manager, packet::ptr_t pkt)
 {
 	switch (pkt->content_status())
 	{
 	case packet::content_attached:
+		if (direct_request_pending_)
+			manager.stop_direct_request(pkt->content_id());
 		for (std::vector<keyed_handler_t>::iterator handler = handlers_.begin(); handler != handlers_.end(); ++handler)
 			(*handler)(pkt->payload_as<payload_content_buffer>()->payload);
 		return true;
 	case packet::content_detached:
-		sources_ = *pkt->payload_as<content_sources::ptr_t>();
-		if (!direct_request_pending_) {
-			if (!partial_content_) {
+		{
+			boost::shared_ptr<content_sources> sources = *pkt->payload_as<content_sources::ptr_t>();
+			if (!direct_request_pending_) {
 				// For now we can't download content which is larger than size_t
 				// this would require modifications in the hunk store to do partial mapping
-				if (sources_->size > std::numeric_limits<std::size_t>::max()) {
+				if (sources->size > std::numeric_limits<std::size_t>::max()) {
 					for (std::vector<keyed_handler_t>::iterator handler = handlers_.begin(); handler != handlers_.end(); ++handler)
 						(*handler)(const_payload_buffer_ptr());
 					return true;
 				}
-				partial_content_ = framented_content(static_cast<content_protocol*>(&node.get_protocol(pkt))->get_payload_buffer(std::size_t(sources_->size)));
+				manager.start_direct_request(pkt->content_id(), sources);
+				direct_request_pending_ = true;
 			}
-			std::pair<std::size_t, std::size_t> range = partial_content_->next_invalid_range();
-			frame_fragment::ptr_t frag(new frame_fragment(pkt->protocol(), pkt->content_id(), range.first, range.second));
-			node.direct_request(sources_->sources.begin()->second.ep, frag);
-			++sources_->sources.begin()->second.active_request_count;
-			direct_request_pending_ = true;
-			direct_request_peer_ = sources_->sources.begin()->first;
+			return false;
 		}
-		return false;
 	case packet::content_failure:
-		if (pkt->source() == direct_request_peer_) {
-			sources_->sources.erase(direct_request_peer_);
-			direct_request_pending_ = false;
-		}
-
-		if ( !direct_request_pending_ ) {
+		if (!direct_request_pending_) {
 			pkt->destination(pkt->source());
-			pkt->source(node.id());
+			pkt->source(manager.node_.id());
 			pkt->content_status(packet::content_requested);
 			pkt->payload(boost::make_shared<payload_request>(content_size_));
 
-			connection::ptr_t con = node.local_request(pkt, last_indirect_request_peer_);
+			connection::ptr_t con = manager.node_.local_request(pkt, last_indirect_request_peer_);
 
 			if (con) {
 				DLOG(INFO) << "Retrying content_request for " << std::string(pkt->destination()) << " to " << std::string(con->remote_id()) << " with inner id " << std::string(last_indirect_request_peer_);
@@ -117,90 +109,18 @@ bool content_request::snoop_packet(local_node& node, packet::ptr_t pkt)
 				return true;
 			}
 		}
-		else {
+		else
 			return false;
-		}
 	default:
 		return false;
 	}
 }
 
-const_payload_buffer_ptr content_request::snoop_fragment(local_node& node, const network_key& src, frame_fragment::ptr_t frag)
+bool content_request::timeout(content_protocol& manager, packet::ptr_t pkt)
 {
-	if (!partial_content_) {
-		// We got a fragment frame for something we haven't started a fragmented download on yet
-		// just ignore it
-		frag->to_request(0, 0);
-		return const_payload_buffer_ptr();
-	}
+	if (direct_request_pending_)
+		return false;
 
-	direct_request_pending_ = false;
-
-	if (!sources_)
-		return const_payload_buffer_ptr();
-
-	content_sources::sources_t::iterator content_source = sources_->sources.find(src);
-
-	if (content_source == sources_->sources.end())
-		return const_payload_buffer_ptr();
-
-	--content_source->second.active_request_count;
-
-	switch (frag->status())
-	{
-	case frame_fragment::status_attached:
-		{
-			partial_content_->mark_valid(frag, content_source->second.ep.address());
-
-			const_payload_buffer_ptr payload = partial_content_->complete();
-
-			if (payload) {
-				if (static_cast<content_protocol*>(&node.get_protocol(frag->protocol()))->content_id(payload) == frag->id())
-					return payload;
-				else
-					partial_content_->reset();
-			}
-			break;
-		}
-	case frame_fragment::status_failed:
-		if (sources_) {
-			sources_->sources.erase(content_source);
-			if (!sources_->sources.empty()) {
-				content_source = sources_->sources.begin();
-			}
-			else
-				return const_payload_buffer_ptr();
-		}
-		break;
-	}
-
-	std::pair<std::size_t, std::size_t> next_range(partial_content_->next_invalid_range());
-	frag->to_request(next_range.first, next_range.second);
-	node.direct_request(content_source->second.ep, frag);
-	++content_source->second.active_request_count;
-	direct_request_pending_ = true;
-	direct_request_peer_ = content_source->first;
-
-	return const_payload_buffer_ptr();
-}
-
-framented_content::fragment_buffer content_request::get_fragment_buffer(std::size_t offset, std::size_t size)
-{
-	if (partial_content_)
-		return partial_content_->get_fragment_buffer(offset, size);
-	else
-		return framented_content::fragment_buffer(offset);
-}
-
-bool content_request::timeout(local_node& node, packet::ptr_t pkt)
-{
-	if (direct_request_pending_) {
-		frame_fragment::ptr_t frag(new frame_fragment(pkt->protocol()));
-		snoop_fragment(node, direct_request_peer_, frag);
-		if (frag->status() != frame_fragment::status_failed)
-			return false;
-	}
-
-	return snoop_packet(node, pkt);
+	return snoop_packet(manager, pkt);
 }
 

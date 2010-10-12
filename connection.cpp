@@ -51,7 +51,7 @@ namespace
 	template <typename Adr>
 	struct link_handshake
 	{
-		boost::uint8_t sig[2];
+		boost::uint8_t sig[6];
 		boost::uint8_t protocol;
 		boost::uint8_t type;
 		boost::uint8_t remote_ip[Adr::bytes_type::static_size];
@@ -60,6 +60,8 @@ namespace
 		boost::uint8_t supported_protocol_count;
 		boost::uint8_t supported_protocols[1][2];
 	};
+
+	const char* handshake_signature = "ANYNET";
 
 	struct oob_threshold_frame
 	{
@@ -119,6 +121,8 @@ void connection::stillborn()
 
 connection::ptr_t connection::connect(local_node& node, ip::tcp::endpoint peer, routing_type rtype)
 {
+	assert(rtype != oob);
+	assert(peer.port() < 11100);
 	DLOG(INFO) << "Connecting: " << node.public_endpoint().port() << ", " << peer.address() << ':' << peer.port();
 	ptr_t con(new connection(node, rtype));
 	con->starting_connection();
@@ -226,8 +230,7 @@ const_buffer connection::do_generate_handshake()
 	const std::vector<protocol_id>& protocols = node_.supported_protocols();
 	link_handshake<Adr>* handshake = buffer_cast<link_handshake<Adr>*>( link_.send_buffer(sizeof(link_handshake<Adr>)
 	                                                                    + (protocols.size() - 1) * 2) );
-	handshake->sig[0] = 'A';
-	handshake->sig[1] = 'N';
+	std::memcpy(handshake->sig, handshake_signature, sizeof(handshake->sig));
 	handshake->protocol = link_.protocol_version;
 	handshake->type = routing_type_;
 
@@ -260,7 +263,7 @@ bool connection::do_parse_handshake()
 //	DLOG(INFO) << "Parsing handshake";
 	const link_handshake<Adr>* handshake = buffer_cast<const link_handshake<Adr>*>(link_.received_buffer());
 
-	if (handshake->sig[0] != 'A' || handshake->sig[1] != 'N' || handshake->protocol != link_.protocol_version)
+	if (std::memcmp(handshake->sig, handshake_signature, sizeof(handshake->sig)) || handshake->protocol != link_.protocol_version)
 		return false;
 
 	routing_type_ = std::min(routing_type_, connection::routing_type(handshake->type & 0x03));

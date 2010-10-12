@@ -36,6 +36,7 @@
 
 #include <glog/logging.h>
 
+#include "transports/trivial/trivial_transport.hpp"
 #include "content_protocol.hpp"
 #include <hunk.hpp>
 #include <key.hpp>
@@ -68,7 +69,7 @@ public:
 		mapped_content::ptr backing;
 	};
 
-	static void create(local_node& node);
+	static void create(local_node& node, boost::shared_ptr<transport::trivial> t);
 
 	insert_buffer get_insertion_buffer(std::size_t size);
 	content_identifier insert_hunk(insert_buffer hunk);
@@ -81,7 +82,10 @@ public:
 
 	virtual const_payload_buffer_ptr get_content(const content_identifier& key);
 	virtual void store_content(hunk_descriptor_t desc, const_payload_buffer_ptr content);
-	virtual content_identifier content_id(const_payload_buffer_ptr content);
+	virtual content_identifier content_id(const_buffer content);
+
+	virtual void start_direct_request(const content_identifier& cid, boost::shared_ptr<content_sources> sources);
+	virtual void stop_direct_request(const content_identifier& cid);
 
 	virtual payload_buffer_ptr get_payload_buffer(std::size_t size)
 	{
@@ -93,6 +97,7 @@ public:
 		stored_hunks_.unlink(content_identifier(id));
 	}
 
+	non_authoritative(local_node& node, boost::shared_ptr<transport::trivial> t);
 	~non_authoritative()
 	{
 #ifdef SIMULATION
@@ -106,9 +111,6 @@ public:
 	}
 
 private:
-
-	non_authoritative(local_node& node);
-
 	template <typename Handler>
 	static void hunk_retrieved(Handler handler, const_payload_buffer_ptr content)
 	{
@@ -122,6 +124,7 @@ private:
 	}
 
 	content_store stored_hunks_;
+	boost::shared_ptr<transport::trivial> transport_;
 };
 
 #endif

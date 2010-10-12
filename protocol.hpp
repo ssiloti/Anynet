@@ -87,8 +87,6 @@ public:
 
 	protocol_id id() const { return protocol_; }
 
-	virtual void initiate_request(const content_identifier& cid, content_size_t size = 0) {}
-
 	void receive_payload(connection::ptr_t con, packet::ptr_t pkt, std::size_t payload_size);
 
 	// Convert request packet to general failure
@@ -98,7 +96,6 @@ public:
 	void request_from_location_failure(packet::ptr_t pkt);
 
 	void snoop_packet(packet::ptr_t pkt);
-	virtual void incoming_frame(connection::ptr_t con, boost::uint8_t frame_type);
 
 	virtual void prune_hunk(const content_identifier& id) {}
 

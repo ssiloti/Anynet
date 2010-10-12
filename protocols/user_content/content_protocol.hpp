@@ -36,6 +36,7 @@
 
 #include <glog/logging.h>
 
+#include "transports/trivial/trivial_transport.hpp"
 #include "user_content_fwd.hpp"
 #include "fragmented_content.hpp"
 #include "request.hpp"
@@ -52,43 +53,39 @@ class local_node;
 namespace user_content
 {
 
-class content_protocol : public network_protocol
+class content_protocol : public network_protocol, public transport::trivial::upper_layer
 {
+	friend class content_request;
 	typedef std::map<content_identifier, boost::shared_ptr<crumb> > crumbs_t;
 
 public:
-	enum frame_types
-	{
-		frame_type_fragment = 128,
-	};
-
 	virtual void prune_hunk(const content_identifier& id) {}
 
 	virtual void receive_attached_content(connection::ptr_t con, packet::ptr_t pkt, std::size_t payload_size);
-	virtual void incoming_frame(connection::ptr_t con, boost::uint8_t frame_type);
-
-	virtual payload_buffer_ptr get_payload_buffer(std::size_t size) { return payload_buffer_ptr(); }
-	virtual framented_content::fragment_buffer get_fragment_buffer(boost::shared_ptr<frame_fragment> frag);
 
 	void new_content_request(const content_identifier& key,
 	                         content_size_t content_size = 0,
 	                         const content_request::keyed_handler_t& handler = content_request::keyed_handler_t());
 	void new_content_store(content_identifier cid, const_payload_buffer_ptr hunk);
-	virtual content_identifier content_id(const_payload_buffer_ptr content) = 0;
+
+	packet::payload_ptr_t self_source(std::size_t content_size);
+
+	virtual void start_direct_request(const content_identifier& cid, boost::shared_ptr<content_sources> sources) = 0;
+	virtual void stop_direct_request(const content_identifier& cid) = 0;
 
 	virtual void to_content_location_failure(packet::ptr_t pkt);
 	virtual void request_from_location_failure(packet::ptr_t pkt);
 
-	virtual void snoop_fragment(const network_key& src, boost::shared_ptr<frame_fragment> frag);
+	virtual void content_finished(const content_identifier& cid, const_payload_buffer_ptr content);
+	virtual const_payload_buffer_ptr get_content(const content_identifier& key) { return const_payload_buffer_ptr(); }
 
 	virtual void shutdown() { network_protocol::shutdown(); vacume_sources_.cancel(); response_handlers_.clear(); }
 
 protected:
-	content_protocol(local_node& node, protocol_id p);
+	content_protocol(local_node& node, protocol_id p, ip::tcp::endpoint public_endpoint);
 
 	virtual void snoop_packet_payload(packet::ptr_t pkt);
 
-	virtual const_payload_buffer_ptr get_content(const content_identifier& key) { return const_payload_buffer_ptr(); }
 	virtual void store_content(hunk_descriptor_t desc, const_payload_buffer_ptr content) {}
 
 private:
@@ -106,11 +103,11 @@ private:
 	void vacume_sources(const boost::system::error_code& error = boost::system::error_code());
 
 	void content_received(connection::ptr_t con, packet::ptr_t pkt);
-	void fragment_received(connection::ptr_t con, boost::shared_ptr<frame_fragment> frag);
 
 	void completed_detached_content_request(hunk_descriptor_t desc, const_payload_buffer_ptr content);
 
 	response_handlers_t response_handlers_;
+	const ip::tcp::endpoint public_transport_endpoint_;
 };
 
 } // namespace user_content

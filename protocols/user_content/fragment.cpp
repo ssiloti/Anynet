@@ -61,7 +61,7 @@ std::size_t frame_fragment::serialize_header(mutable_buffer buf) const
 {
 	packed_fragment_header* h = buffer_cast<packed_fragment_header*>(buf);
 
-	h->frame_type = content_protocol::frame_type_fragment;
+//	h->frame_type = content_protocol::frame_type_fragment;
 	u16(h->protocol, protocol_);
 	h->status_name_components = id_.name.component_count() | (status() << 6);
 	id_.publisher.encode(h->key);
@@ -131,7 +131,7 @@ bool frame_fragment::done(std::size_t bytes_transfered)
 void frame_fragment::send_failure(local_node& node, const network_key& dest)
 {
 	to_reply();
-	static_cast<content_protocol*>(&node.get_protocol(protocol_))->snoop_fragment(dest, shared_from_this());
+//	static_cast<content_protocol*>(&node.get_protocol(protocol_))->snoop_fragment(dest, shared_from_this());
 }
 
 void frame_fragment::to_request(std::size_t o, std::size_t s)

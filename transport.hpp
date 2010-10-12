@@ -31,41 +31,27 @@
 //
 // Contact:  Steven Siloti <ssiloti@gmail.com>
 
-#ifndef USER_CONTENT_PAYLOAD_CONTENT_BUFFER_HPP
-#define USER_CONTENT_PAYLOAD_CONTENT_BUFFER_HPP
+#ifndef TRANSPORT_HPP
+#define TRANSPORT_HPP
 
-#include "packet.hpp"
 #include "core.hpp"
+#include <boost/function.hpp>
 
-namespace user_content
-{
+class local_node;
 
-class content_protocol;
-
-class payload_content_buffer : public sendable_payload
+class network_transport
 {
 public:
-	virtual content_size_t content_size() const
-	{
-		return buffer_size(payload->get());
-	}
+	network_transport(transport_id i, local_node& n)
+		: id_(i), node_(n) {}
 
-	virtual boost::shared_ptr<const packet> trim(boost::shared_ptr<const packet> pkt, std::size_t threshold) const;
+	transport_id id();
 
-	virtual std::vector<const_buffer> serialize(boost::shared_ptr<const packet> pkt, std::size_t threshold, mutable_buffer scratch) const
-	{
-		assert(buffer_size(payload->get()) <= threshold);
-		return std::vector<const_buffer>(1, payload->get());
-	}
-
-	payload_content_buffer(content_protocol& origin, const_payload_buffer_ptr p) : origin_(origin), payload(p) {}
-
-	const_payload_buffer_ptr payload;
+protected:
+	local_node& node_;
 
 private:
-	content_protocol& origin_;
+	const transport_id id_;
 };
-
-}
 
 #endif

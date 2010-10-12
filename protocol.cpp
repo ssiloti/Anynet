@@ -129,11 +129,6 @@ void network_protocol::snoop_packet(packet::ptr_t pkt)
 	}
 }
 
-void network_protocol::incoming_frame(connection::ptr_t con, boost::uint8_t frame_type)
-{
-	node_.receive_failure(con);
-}
-
 void network_protocol::drop_crumb(packet::ptr_t pkt, boost::weak_ptr<connection> con)
 {
 	std::pair<crumbs_t::iterator, bool> crumb_entry = crumbs_.insert(std::make_pair(pkt->content_id(), boost::shared_ptr<crumb>()));

@@ -72,18 +72,6 @@ namespace
 		ip::tcp::endpoint ep;
 	};
 
-	struct oob_connection_remote_endpoint_comparator
-	{
-		oob_connection_remote_endpoint_comparator(ip::tcp::endpoint peer) : ep(peer) {}
-
-		bool operator()(local_node::oob_peer::ptr_t peer)
-		{
-			return peer->con->remote_endpoint() == ep;
-		}
-
-		ip::tcp::endpoint ep;
-	};
-
 	struct hunk_descriptor_comparator
 	{
 		hunk_descriptor_comparator() : now(boost::posix_time::second_clock::universal_time()) {}
@@ -143,8 +131,6 @@ local_node::~local_node()
 		ib_peers_.pop_back();
 		con->disconnect();
 	}
-	for (std::vector<oob_peer::ptr_t>::iterator it = oob_peers_.begin(); it != oob_peers_.end(); ++it)
-		(*it)->con->disconnect();
 	for (std::vector<connection::ptr_t>::iterator it = connecting_peers_.begin(); it != connecting_peers_.end(); ++it)
 		(*it)->disconnect();
 
@@ -367,7 +353,7 @@ void local_node::register_connection(connection::ptr_t con)
 			}
 		}
 		else {
-			oob_peers_.push_back(oob_peer::create(*this, con));
+			// TODO: Remove as part of out-of-band network peer removal
 		}
 	}
 	else if (connection_count() == 0)
@@ -454,39 +440,6 @@ connection::ptr_t local_node::local_request(packet::ptr_t pkt, const network_key
 	return connection::ptr_t();
 }
 
-void local_node::direct_request(ip::tcp::endpoint peer, protocol_frame::ptr_t frag)
-{
-	std::vector<connection::ptr_t>::iterator
-		con_iter = std::find_if(ib_peers_.begin(),
-		                        ib_peers_.end(),
-		                        connection_remote_endpoint_comparator(peer));
-	connection::ptr_t con;
-
-	if (con_iter == ib_peers_.end()) {
-		std::vector<oob_peer::ptr_t>::iterator
-			ocon_iter = std::find_if(oob_peers_.begin(),
-			                         oob_peers_.end(),
-			                         oob_connection_remote_endpoint_comparator(peer));
-		if (ocon_iter == oob_peers_.end()) {
-			con_iter = std::find_if(connecting_peers_.begin(),
-			                        connecting_peers_.end(),
-			                        connection_remote_endpoint_comparator(peer));
-			if (con_iter == connecting_peers_.end())
-				con = connection::connect(*this, peer, connection::oob);
-			else
-				con = *con_iter;
-		}
-		else {
-			con = (*ocon_iter)->con;
-			(*ocon_iter)->reset_timeout();
-		}
-	}
-	else
-		con = *con_iter;
-
-	con->send(frag);
-}
-
 void local_node::snoop(packet::ptr_t pkt)
 {
 	protocol_handlers_t::iterator protocol_handler = protocol_handlers_.find(pkt->protocol());
@@ -565,14 +518,6 @@ void local_node::packet_received(connection::ptr_t con, packet::ptr_t pkt)
 
 	if (con->accepts_ib_traffic() && pkt->content_status() == packet::content_requested)
 		protocol.drop_crumb(pkt, con);
-	else if (!con->accepts_ib_traffic()) {
-		std::vector<oob_peer::ptr_t>::iterator
-			oob_peer_iter = std::find_if(oob_peers_.begin(),
-			                             oob_peers_.end(),
-			                             oob_connection_remote_endpoint_comparator(con->remote_endpoint()));
-		if (oob_peer_iter != oob_peers_.end())
-			(*oob_peer_iter)->reset_timeout();
-	}
 
 	try {
 		snoop(pkt);
@@ -741,19 +686,6 @@ void local_node::packet_received(connection::ptr_t con, packet::ptr_t pkt)
 	}
 }
 
-void local_node::incoming_protocol_frame(connection::ptr_t con, protocol_id protocol, boost::uint8_t frame_type)
-{
-	network_protocol::ptr_t protocol_handler = validate_protocol(protocol);
-
-	if (!protocol_handler)
-	{
-		receive_failure(con);
-		return;
-	}
-
-//	protocol_handler->incoming_frame(con, frame_type);
-}
-
 void local_node::recompute_identity()
 {
 	std::FILE* fp = std::fopen((config().content_store_path() + "/client_id.pem").c_str(), "r");
@@ -802,13 +734,6 @@ void local_node::make_connection(ip::tcp::endpoint peer)
 		if ((*it)->remote_endpoint() == peer && (*it)->accepts_ib_traffic())
 			return;
 
-//	for (std::vector<oob_peer::ptr_t>::iterator it = oob_peers_.begin(); it != oob_peers_.end(); ++it)
-//		if ((*it)->remote_endpoint() == peer && ((*it)->accepts_ib_traffic() || rtype != connection::ib))
-//			return;
-//	if (!ib)
-//		for (std::vector<connection::weak_ptr_t>::iterator it = oob_peers_.begin(); it != preband_peers_.end(); ++it)
-			//if ((*it)->remote_endpoint() == peer && ((*it)->oob_threshold() || !ib))
-			//	return;
 	connection::connect(*this, peer, connection::ib);
 }
 
@@ -907,10 +832,6 @@ void local_node::disconnect_peer(connection::ptr_t con)
 		peer = std::find(disconnecting_peers_.begin(), disconnecting_peers_.end(), con);
 		if (peer != disconnecting_peers_.end())
 			disconnecting_peers_.erase(peer);
-
-		std::vector<oob_peer::ptr_t>::iterator opeer = std::find(oob_peers_.begin(), oob_peers_.end(), con);
-		if (opeer != oob_peers_.end())
-			oob_peers_.erase(opeer);
 
 		con->disconnect();
 	}

@@ -62,50 +62,6 @@ class local_node
 	static const int replication_factor = 20;
 
 public:
-	struct oob_peer : boost::enable_shared_from_this<oob_peer>
-	{
-		typedef boost::shared_ptr<oob_peer> ptr_t;
-
-		static ptr_t create(local_node& node, connection::ptr_t con)
-		{
-			ptr_t n(new oob_peer(node, con));
-			n->reset_timeout();
-			return n;
-		}
-
-		~oob_peer()
-		{
-			DLOG(INFO) << "Destroyed oob peer " << this;
-			timeout.cancel();
-		}
-
-		void reset_timeout()
-		{
-			timeout.expires_from_now(boost::posix_time::seconds(60));
-			timeout.async_wait(boost::bind(&oob_peer::disconnect, shared_from_this(), placeholders::error));
-		}
-
-		void disconnect(const boost::system::error_code& error)
-		{
-			if (!error) {
-				if (!con->is_transfer_outstanding())
-					node.disconnect_peer(con);
-				else
-					reset_timeout();
-			}
-		}
-
-		connection::ptr_t con;
-		local_node& node;
-		boost::asio::deadline_timer timeout;
-
-	private:
-		oob_peer(local_node& node, connection::ptr_t con)
-			: con(con), node(node), timeout(node.io_service())
-		{}
-	};
-	friend struct oob_peer;
-
 	local_node(boost::asio::io_service& io_service, client_config& config);
 	~local_node();
 
@@ -154,7 +110,6 @@ public:
 	int closer_peers(const network_key& key) const;
 
 	// requests
-	void direct_request(ip::tcp::endpoint peer, protocol_frame::ptr_t frag);
 	connection::ptr_t local_request(packet::ptr_t pkt);
 	connection::ptr_t local_request(packet::ptr_t pkt, const network_key& inner_id);
 	connection::ptr_t dispatch(packet::ptr_t pkt);
@@ -165,8 +120,6 @@ public:
 	// the node is expected to return a buffer into which the payload data will be written
 	void incoming_packet(connection::ptr_t con, packet::ptr_t pkt, std::size_t payload_size);
 	void packet_received(connection::ptr_t con, packet::ptr_t pkt);
-
-	void incoming_protocol_frame(connection::ptr_t con, protocol_id protocol, boost::uint8_t frame_type);
 
 	// failures
 	void send_failure(connection::ptr_t con);
@@ -241,7 +194,6 @@ private:
 	network_key                identity_;
 
 	std::vector<connection::ptr_t> ib_peers_;
-	std::vector<oob_peer::ptr_t>   oob_peers_;
 	std::vector<connection::ptr_t> connecting_peers_;
 	std::vector<connection::ptr_t> disconnecting_peers_;
 
@@ -262,7 +214,5 @@ private:
 
 	known_peers traffic_stats_;
 };
-
-inline bool operator==(local_node::oob_peer::ptr_t l, connection::ptr_t r) { return r == l->con; }
 
 #endif

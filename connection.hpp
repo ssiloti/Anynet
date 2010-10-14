@@ -122,7 +122,7 @@ public:
 
 	bool is_transfer_outstanding() const
 	{
-		return receive_outstanding_ || outstanding_non_packet_frames_ || !packet_queue_.empty() || !frame_queue_.empty();
+		return receive_outstanding_ || outstanding_non_packet_frames_ || !packet_queue_.empty();
 	}
 
 	bool supports_protocol(protocol_id p)
@@ -149,7 +149,6 @@ public:
 	void disconnect();
 
 	void send(packet::ptr_t pkt, std::size_t oob_threshold_override = std::numeric_limits<std::size_t>::max());
-	void send(protocol_frame::ptr_t frame, std::size_t oob_threshold_override = std::numeric_limits<std::size_t>::max());
 
 	template <typename Handler>
 	void receive_payload(std::size_t payload_size, Handler handler)
@@ -250,19 +249,6 @@ private:
 		std::size_t oob_threshold_override;
 	};
 
-	struct queued_protocol_frame
-	{
-		queued_protocol_frame(boost::shared_ptr<protocol_frame> f, std::size_t o)
-			: frame(f)
-			, entered(boost::posix_time::microsec_clock::universal_time())
-			, oob_threshold_override(o)
-		{}
-
-		boost::shared_ptr<protocol_frame> frame;
-		boost::posix_time::ptime entered;
-		std::size_t oob_threshold_override;
-	};
-
 	struct pending_ack
 	{
 		pending_ack(boost::posix_time::ptime e, std::size_t b) : entered(e), bytes_transfered(b) {}
@@ -327,7 +313,6 @@ private:
 	void send_next_frame(int send_non_packet_frame);
 	void send_next_frame();
 	void packet_sent(const boost::system::error_code& error, std::size_t bytes_transfered);
-	void protocol_frame_sent(const boost::system::error_code& error, std::size_t bytes_transfered);
 	void frame_sent(frame_bits frame_bit, const boost::system::error_code& error, std::size_t bytes_transfered);
 
 	void connection_accepted(const boost::system::error_code& error, ip::tcp::acceptor& incoming);
@@ -358,7 +343,6 @@ private:
 	std::vector<protocol_id> supported_protocols_;
 
 	std::deque<queued_packet> packet_queue_;
-	std::deque<queued_protocol_frame> frame_queue_;
 	std::deque<pending_ack> ack_queue_;
 	int outstanding_non_packet_frames_;
 	unsigned ack_sends_needed_;

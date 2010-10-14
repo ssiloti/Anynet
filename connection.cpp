@@ -121,8 +121,6 @@ void connection::stillborn()
 
 connection::ptr_t connection::connect(local_node& node, ip::tcp::endpoint peer, routing_type rtype)
 {
-	assert(rtype != oob);
-	assert(peer.port() < 11100);
 	DLOG(INFO) << "Connecting: " << node.public_endpoint().port() << ", " << peer.address() << ':' << peer.port();
 	ptr_t con(new connection(node, rtype));
 	con->starting_connection();
@@ -352,19 +350,11 @@ void connection::send(packet::ptr_t pkt, std::size_t oob_threshold_override)
 {
 	packet_queue_.push_back(queued_packet(pkt, oob_threshold_override));
 
-	if (!outstanding_non_packet_frames_ && packet_queue_.size() == 1 && frame_queue_.empty() && lifecycle_ == connected) {
+	if (!outstanding_non_packet_frames_ && packet_queue_.size() == 1 && lifecycle_ == connected) {
 		send_next_frame();
 	}
 	else
 		DLOG(INFO) << "Queued packet from " << std::string(node_.id()) << " to " << std::string(remote_id());
-}
-
-void connection::send(protocol_frame::ptr_t frame, std::size_t oob_threshold_override)
-{
-	frame_queue_.push_back(queued_protocol_frame(frame, oob_threshold_override));
-
-	if (!outstanding_non_packet_frames_ && packet_queue_.empty() && frame_queue_.size() == 1 && lifecycle_ == connected)
-		send_next_frame();
 }
 
 void connection::receive_next_frame()
@@ -400,92 +390,70 @@ void connection::frame_head_received(const boost::system::error_code& error, std
 	while (link_.valid_received_bytes())
 	{
 		int frame_type(buffer_cast<const boost::uint8_t*>(link_.received_buffer())[0]);
-		if (!(frame_type & 0x80)) {
-			// This is a standard frame (frame_id < 128)
-			switch (frame_type)
+		switch (frame_type)
+		{
+		case frame_network_packet:
 			{
-			case frame_network_packet:
-				{
-		//			DLOG(INFO) << "Receiving network packet frame";
-					packet::ptr_t pkt(boost::make_shared<packet>());
-					pkt->receive(link_, boost::protect(boost::bind(&connection::incoming_packet, shared_from_this(), _1, _2)));
-					return;
-				}
-			case frame_oob_threshold_update:
-				if (link_.valid_received_bytes() >= oob_threshold_size()) {
-					parse_oob_threshold();
+	//			DLOG(INFO) << "Receiving network packet frame";
+				packet::ptr_t pkt(boost::make_shared<packet>());
+				pkt->receive(link_, boost::protect(boost::bind(&connection::incoming_packet, shared_from_this(), _1, _2)));
+				return;
+			}
+		case frame_oob_threshold_update:
+			if (link_.valid_received_bytes() >= oob_threshold_size()) {
+				parse_oob_threshold();
+				break;
+			}
+
+			boost::asio::async_read(link_.socket,
+			                        mutable_buffers_1(link_.receive_buffer()),
+			                        boost::asio::transfer_at_least(oob_threshold_size() - link_.valid_received_bytes()),
+			                        boost::bind(&connection::frame_head_received,
+			                                    shared_from_this(),
+			                                    placeholders::error,
+			                                    placeholders::bytes_transferred));
+			return;
+
+		case frame_successor_request:
+			{
+				if (link_.valid_received_bytes() >= 4) {
+					DLOG(INFO) << std::string(node_.id()) << "Sending successor";
+					send_next_frame(frame_bit_successor);
+					link_.consume_receive_buffer(4);
 					break;
 				}
 
 				boost::asio::async_read(link_.socket,
 				                        mutable_buffers_1(link_.receive_buffer()),
-				                        boost::asio::transfer_at_least(oob_threshold_size() - link_.valid_received_bytes()),
+				                        boost::asio::transfer_at_least(4 - link_.valid_received_bytes()),
 				                        boost::bind(&connection::frame_head_received,
 				                                    shared_from_this(),
 				                                    placeholders::error,
 				                                    placeholders::bytes_transferred));
-				return;
 
-			case frame_successor_request:
-				{
-					if (link_.valid_received_bytes() >= 4) {
-						DLOG(INFO) << std::string(node_.id()) << "Sending successor";
-						send_next_frame(frame_bit_successor);
-						link_.consume_receive_buffer(4);
-						break;
-					}
-
-					boost::asio::async_read(link_.socket,
-					                        mutable_buffers_1(link_.receive_buffer()),
-					                        boost::asio::transfer_at_least(4 - link_.valid_received_bytes()),
-					                        boost::bind(&connection::frame_head_received,
-					                                    shared_from_this(),
-					                                    placeholders::error,
-					                                    placeholders::bytes_transferred));
-
-					return;
-				}
-
-			case frame_successor:
-				if (link_.valid_received_bytes() >= successor_size()) {
-					parse_successor();
-					break;
-				}
-
-				boost::asio::async_read(link_.socket,
-				                        mutable_buffers_1(link_.receive_buffer()),
-				                        boost::asio::transfer_at_least(oob_threshold_size() - link_.valid_received_bytes()),
-				                        boost::bind(&connection::frame_head_received,
-				                                    shared_from_this(),
-				                                    placeholders::error,
-				                                    placeholders::bytes_transferred));
-				return;
-
-			default:
-				{
-					DLOG(INFO) << "Unknown frame type: " << buffer_cast<const boost::uint8_t*>(link_.received_buffer())[0];
-					google::FlushLogFiles(google::INFO);
-					node_.receive_failure(shared_from_this());
-					return;
-				}
-			}
-		}
-		else {
-			// this is a protocol specific frame
-			// get the protocol and hand it off to the node
-			if (link_.valid_received_bytes() >= 4) {
-				protocol_id protocol = buffer_cast<const boost::uint16_t*>(link_.received_buffer())[1];
-				node_.incoming_protocol_frame(shared_from_this(), protocol, frame_type);
 				return;
 			}
-			else {
-				boost::asio::async_read(link_.socket,
-				                        mutable_buffers_1(link_.receive_buffer()),
-				                        boost::asio::transfer_at_least(1),
-				                        boost::bind(&connection::frame_head_received,
-				                                    shared_from_this(),
-				                                    placeholders::error,
-				                                    placeholders::bytes_transferred));
+
+		case frame_successor:
+			if (link_.valid_received_bytes() >= successor_size()) {
+				parse_successor();
+				break;
+			}
+
+			boost::asio::async_read(link_.socket,
+			                        mutable_buffers_1(link_.receive_buffer()),
+			                        boost::asio::transfer_at_least(oob_threshold_size() - link_.valid_received_bytes()),
+			                        boost::bind(&connection::frame_head_received,
+			                                    shared_from_this(),
+			                                    placeholders::error,
+			                                    placeholders::bytes_transferred));
+			return;
+
+		default:
+			{
+				DLOG(INFO) << "Unknown frame type: " << buffer_cast<const boost::uint8_t*>(link_.received_buffer())[0];
+				google::FlushLogFiles(google::INFO);
+				node_.receive_failure(shared_from_this());
 				return;
 			}
 		}
@@ -610,7 +578,7 @@ std::size_t do_generate_successor_frame(net_link& link, const Addr& sucessor_add
 
 void connection::send_next_frame(int send_non_packet_frame)
 {
-	if (!outstanding_non_packet_frames_ && packet_queue_.empty() && frame_queue_.empty() && lifecycle_ == connected) {
+	if (!outstanding_non_packet_frames_ && packet_queue_.empty() && lifecycle_ == connected) {
 		outstanding_non_packet_frames_ |= send_non_packet_frame;
 		send_next_frame();
 	}
@@ -702,38 +670,6 @@ void connection::send_next_frame()
 		                                     placeholders::error,
 		                                     placeholders::bytes_transferred));
 	}
-	else if (!frame_queue_.empty()) {
-		DLOG(INFO) << "Sending fragment from " << std::string(node_.id()) << " to " << std::string(remote_id());
-
-		std::size_t threshold
-			= frame_queue_.front().oob_threshold_override == std::numeric_limits<std::size_t>::max()
-			? oob_threshold() : packet_queue_.front().oob_threshold_override;
-
-		const std::vector<const_buffer>& send_buffers = frame_queue_.front().frame->serialize(threshold, link_.send_buffer());
-
-		std::size_t bytes_transfered = 0;
-		for (std::vector<const_buffer>::const_iterator buf = send_buffers.begin(); buf != send_buffers.end(); ++buf)
-			bytes_transfered += buffer_size(*buf);
-
-#ifdef SIMULATION
-		if (send_delay_.expires_at() == boost::date_time::not_a_date_time) {
-			send_delay_.expires_from_now(boost::posix_time::milliseconds(bytes_transfered / 2));
-			send_delay_.async_wait(boost::bind(&connection::send_delayed_frame, shared_from_this(), placeholders::error));
-			return;
-		}
-		send_delay_.expires_at(boost::date_time::not_a_date_time);
-#endif
-		ack_queue_.push_back(pending_ack(frame_queue_.front().entered, bytes_transfered));
-
-		DLOG(INFO) << "Sending " << bytes_transfered << " fragment bytes";
-
-		boost::asio::async_write(link_.socket,
-		                         send_buffers,
-		                         boost::bind(&connection::protocol_frame_sent,
-		                                     shared_from_this(),
-		                                     placeholders::error,
-		                                     placeholders::bytes_transferred));
-	}
 }
 
 void connection::packet_sent(const boost::system::error_code& error, std::size_t bytes_transfered)
@@ -748,30 +684,6 @@ void connection::packet_sent(const boost::system::error_code& error, std::size_t
 	}
 	else {
 		DLOG(INFO) << std::string(node_.id()) << " Failed sending packet";
-		if (lifecycle_ != cleanup) {
-			lifecycle_ = disconnecting;
-			link_.socket.lowest_layer().shutdown(ip::tcp::socket::shutdown_send);
-			node_.send_failure(shared_from_this());
-			redispatch_send_queue();
-		}
-	}
-}
-
-void connection::protocol_frame_sent(const boost::system::error_code& error, std::size_t bytes_transfered)
-{
-	if (!error && link_.socket.lowest_layer().is_open()) {
-
-		DLOG(INFO) << std::string(node_.id()) << " Sent " << bytes_transfered << " bytes of fragment content";
-	//	update_local_threshold(boost::posix_time::microsec_clock::universal_time() - frame_sent_, bytes_transfered);
-		node_.sent_content(remote_id(), bytes_transfered);
-
-		if (frame_queue_.front().frame->done(bytes_transfered))
-			frame_queue_.pop_front();
-
-		send_next_frame();
-	}
-	else {
-		DLOG(INFO) << std::string(node_.id()) << " Failed sending frame";
 		if (lifecycle_ != cleanup) {
 			lifecycle_ = disconnecting;
 			link_.socket.lowest_layer().shutdown(ip::tcp::socket::shutdown_send);
@@ -825,9 +737,6 @@ void connection::redispatch_send_queue()
 				// this was a direct request, turn it into an error so the requester gets notified
 				it->pkt->to_reply(packet::content_failure);
 			node_.dispatch(it->pkt);
-		}
-		for (std::deque<queued_protocol_frame>::iterator frame = frame_queue_.begin(); frame != frame_queue_.end(); ++frame) {
-			(*frame).frame->send_failure(node_, remote_id());
 		}
 	}
 	packet_queue_.clear();

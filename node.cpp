@@ -348,6 +348,8 @@ void local_node::register_connection(connection::ptr_t con)
 			DLOG(INFO) << "New in-band Connection established";
 			ib_peers_.push_back(con);
 
+			peer_set_changed();
+
 			// check to see if this guy is the new predessesor for us
 			std::vector<connection::ptr_t>::iterator predessesor = closest_peer<distance>(id()+1, id()-1, id());
 
@@ -767,10 +769,8 @@ boost::posix_time::time_duration local_node::base_hunk_lifetime()
 	return boost::posix_time::seconds(long(mean(peer_stats) + std::sqrt(variance(peer_stats))));
 }
 
-void local_node::add_peer(connection::ptr_t peer)
+void local_node::peer_set_changed()
 {
-	ib_peers_.push_back(peer);
-
 	if (ib_peers_.size() > replication_factor) {
 		for (std::vector<connection::ptr_t>::iterator peer = ib_peers_.begin(); peer != ib_peers_.end(); ++peer) {
 			if (closer_peers((*peer)->remote_id()) == replication_factor) {
@@ -779,20 +779,20 @@ void local_node::add_peer(connection::ptr_t peer)
 			}
 		}
 	}
+	else
+		replication_min_dist_ = key_max;
 }
 
-void local_node::remove_peer(connection::ptr_t peer)
+void local_node::remove_peer(std::vector<connection::ptr_t>::iterator peer)
 {
 	// update the closer peers count for cache policy tracking
 	for (std::list<stored_hunk>::iterator hunk = stored_hunks_.begin(); hunk != stored_hunks_.end(); ++hunk) {
-		if (!hunk->local_requested && ::distance(hunk->id.publisher, peer->remote_id()) < ::distance(hunk->id.publisher, id()))
+		if (!hunk->local_requested && ::distance(hunk->id.publisher, (*peer)->remote_id()) < ::distance(hunk->id.publisher, id()))
 			hunk->closer_peers--;
 	}
 
-	ib_peers_.erase(std::find(ib_peers_.begin(), ib_peers_.end(), peer));
-
-	if (ib_peers_.size() <= replication_factor)
-		replication_min_dist_ = key_max;
+	ib_peers_.erase(peer);
+	peer_set_changed();
 }
 
 void local_node::send_failure(connection::ptr_t con)
@@ -801,14 +801,7 @@ void local_node::send_failure(connection::ptr_t con)
 	if (con->is_connected()) {
 		std::vector<connection::ptr_t>::iterator peer = std::find(ib_peers_.begin(), ib_peers_.end(), con);
 		if (peer != ib_peers_.end()) {
-
-			// update the closer peers count for cache policy tracking
-			for (std::list<stored_hunk>::iterator hunk = stored_hunks_.begin(); hunk != stored_hunks_.end(); ++hunk) {
-				if (!hunk->local_requested && ::distance(hunk->id.publisher, con->remote_id()) < ::distance(hunk->id.publisher, id()))
-					hunk->closer_peers--;
-			}
-
-			ib_peers_.erase(peer);
+			remove_peer(peer);
 			disconnecting_peers_.push_back(con);
 		}
 	}
@@ -833,14 +826,7 @@ void local_node::disconnect_peer(connection::ptr_t con)
 					(*new_rs)->request_reverse_successor();
 				}
 			}
-
-			// update the closer peers count for cache policy tracking
-			for (std::list<stored_hunk>::iterator hunk = stored_hunks_.begin(); hunk != stored_hunks_.end(); ++hunk) {
-				if (!hunk->local_requested && ::distance(hunk->id.publisher, con->remote_id()) < ::distance(hunk->id.publisher, id()))
-					hunk->closer_peers--;
-			}
-
-			ib_peers_.erase(peer);
+			remove_peer(peer);
 		}
 
 		peer = std::find(connecting_peers_.begin(), connecting_peers_.end(), con);

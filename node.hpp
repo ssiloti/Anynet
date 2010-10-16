@@ -150,8 +150,8 @@ private:
 	void snoop(packet::ptr_t pkt);
 	void disconnect_peer(connection::ptr_t con);
 
-	void add_peer(connection::ptr_t peer);
-	void remove_peer(connection::ptr_t peer);
+	void peer_set_changed();
+	void remove_peer(std::vector<connection::ptr_t>::iterator peer);
 
 	network_protocol::ptr_t validate_protocol(protocol_id protocol);
 

@@ -114,10 +114,19 @@ void connection::starting_connection()
 void connection::stillborn()
 {
 	DLOG(INFO) << "Error while establishing connection";
-	if (lifecycle_ != cleanup) {
-		lifecycle_ = cleanup;
-		node_->register_connection(shared_from_this());
-	}
+	close();
+	node_->register_connection(shared_from_this());
+}
+
+void connection::send_failure()
+{
+	DLOG(INFO) << std::string(node_->id()) << " Failed sending";
+	if (lifecycle_ != cleanup)
+		lifecycle_ = disconnecting;
+	boost::system::error_code error;
+	link_.socket.lowest_layer().shutdown(ip::tcp::socket::shutdown_send, error);
+	node_->send_failure(shared_from_this());
+	redispatch_send_queue();
 }
 
 connection::ptr_t connection::connect(boost::shared_ptr<local_node> node, ip::tcp::endpoint peer, routing_type rtype)
@@ -146,29 +155,18 @@ void connection::accept(boost::shared_ptr<local_node> node, ip::tcp::acceptor& i
 
 void connection::connection_accepted(const boost::system::error_code& error, ip::tcp::acceptor& incoming)
 {
-	if (!error && lifecycle_ == connecting) {
-		ptr_t con(new connection(node_, ib));
-		con->starting_connection();
-		incoming.async_accept(con->link_.socket.lowest_layer(),
-		                      boost::bind(&connection::connection_accepted,
-		                                  con,
-		                                  placeholders::error,
-		                                  boost::ref(incoming)));
-		
-		ssl_handshake(boost::asio::ssl::stream_base::server, boost::system::error_code());
+	if (error) {
+		stillborn();
+		return;
 	}
-	else {
-		if (lifecycle_ != cleanup) {
-			close();
-			stillborn();
-		}
-	}
+
+	accept(node_, incoming);
+	ssl_handshake(boost::asio::ssl::stream_base::server, boost::system::error_code());
 }
 
 void connection::ssl_handshake(boost::asio::ssl::stream_base::handshake_type type, const boost::system::error_code& error)
 {
-	if (error && lifecycle_ != cleanup) {
-		close();
+	if (error) {
 		stillborn();
 		return;
 	}
@@ -181,46 +179,40 @@ void connection::ssl_handshake(boost::asio::ssl::stream_base::handshake_type typ
 
 void connection::write_handshake(const boost::system::error_code& error)
 {
-	if (!error && lifecycle_ == connecting) {
-		boost::asio::async_write(link_.socket,
-		                         const_buffers_1(generate_handshake()),
-		                         boost::bind(&connection::read_handshake,
-		                                     shared_from_this(),
-		                                     placeholders::error,
-		                                     placeholders::bytes_transferred));
+	if (error) {
+		stillborn();
+		return;
 	}
-	else {
-		if (lifecycle_ != cleanup) {
-			close();
-			stillborn();
-		}
-	}
+
+	boost::asio::async_write(link_.socket,
+	                         const_buffers_1(generate_handshake()),
+	                         boost::bind(&connection::read_handshake,
+	                                     shared_from_this(),
+	                                     placeholders::error,
+	                                     placeholders::bytes_transferred));
 }
 
 void connection::read_handshake(const boost::system::error_code& error, std::size_t bytes_transferred)
 {
-	if (!error && lifecycle_ == connecting) {
-		std::size_t handshake_min_size;
-
-		if (link_.socket.lowest_layer().remote_endpoint().address().is_v4())
-			handshake_min_size = sizeof(link_handshake<ip::address_v4>);
-		else
-			handshake_min_size = sizeof(link_handshake<ip::address_v6>);
-
-		boost::asio::async_read(link_.socket,
-		                        mutable_buffers_1(link_.receive_buffer()),
-		                        boost::asio::transfer_at_least(handshake_min_size),
-		                        boost::bind(&connection::handshake_received,
-		                                    shared_from_this(),
-		                                    placeholders::error,
-		                                    placeholders::bytes_transferred));
+	if (error) {
+		stillborn();
+		return;
 	}
-	else {
-		if (lifecycle_ != cleanup) {
-			close();
-			stillborn();
-		}
-	}
+
+	std::size_t handshake_min_size;
+
+	if (link_.socket.lowest_layer().remote_endpoint().address().is_v4())
+		handshake_min_size = sizeof(link_handshake<ip::address_v4>);
+	else
+		handshake_min_size = sizeof(link_handshake<ip::address_v6>);
+
+	boost::asio::async_read(link_.socket,
+	                        mutable_buffers_1(link_.receive_buffer()),
+	                        boost::asio::transfer_at_least(handshake_min_size),
+	                        boost::bind(&connection::handshake_received,
+	                                    shared_from_this(),
+	                                    placeholders::error,
+	                                    placeholders::bytes_transferred));
 }
 
 template <typename Adr>
@@ -280,11 +272,8 @@ bool connection::do_parse_handshake()
 
 void connection::handshake_received(const boost::system::error_code& error, std::size_t bytes_transferred)
 {
-	if (error || lifecycle_ != connecting) {
-		if (lifecycle_ != cleanup) {
-			close();
-			stillborn();
-		}
+	if (error) {
+		stillborn();
 		return;
 	}
 
@@ -319,11 +308,8 @@ void connection::handshake_received(const boost::system::error_code& error, std:
 
 void connection::complete_connection(const boost::system::error_code& error, std::size_t bytes_transferred)
 {
-	if (error || lifecycle_ != connecting) {
-		if (lifecycle_ != cleanup) {
-			close();
-			stillborn();
-		}
+	if (error) {
+		stillborn();
 		return;
 	}
 
@@ -378,7 +364,7 @@ void connection::receive_next_frame()
 
 void connection::frame_head_received(const boost::system::error_code& error, std::size_t bytes_transfered)
 {
-	if (error || lifecycle_ != connected) {
+	if (error) {
 		DLOG(INFO) << "Error receiving frame";
 		node_->receive_failure(shared_from_this());
 		return;
@@ -675,23 +661,17 @@ void connection::send_next_frame()
 
 void connection::packet_sent(const boost::system::error_code& error, std::size_t bytes_transfered)
 {
-	if (!error && link_.socket.lowest_layer().is_open()) {
-		DLOG(INFO) << std::string(node_->id()) << " Sent " << bytes_transfered << " bytes of packet content";
-
-		node_->sent_content(remote_id(), bytes_transfered);
-		packet_queue_.pop_front();
-
-		send_next_frame();
+	if (error) {
+		send_failure();
+		return;
 	}
-	else {
-		DLOG(INFO) << std::string(node_->id()) << " Failed sending packet";
-		if (lifecycle_ != cleanup) {
-			lifecycle_ = disconnecting;
-			link_.socket.lowest_layer().shutdown(ip::tcp::socket::shutdown_send);
-			node_->send_failure(shared_from_this());
-			redispatch_send_queue();
-		}
-	}
+
+	DLOG(INFO) << std::string(node_->id()) << " Sent " << bytes_transfered << " bytes of packet content";
+
+	node_->sent_content(remote_id(), bytes_transfered);
+	packet_queue_.pop_front();
+
+	send_next_frame();
 }
 
 void connection::frame_sent(frame_bits frame_bit, const boost::system::error_code& error, std::size_t bytes_transfered)
@@ -701,12 +681,7 @@ void connection::frame_sent(frame_bits frame_bit, const boost::system::error_cod
 		outstanding_non_packet_frames_ &= ~frame_bit;
 
 	if (error) {
-		if (lifecycle_ == connected) {
-			lifecycle_ = disconnecting;
-			link_.socket.lowest_layer().shutdown(ip::tcp::socket::shutdown_send);
-			node_->send_failure(shared_from_this());
-			redispatch_send_queue();
-		}
+		send_failure();
 		return;
 	}
 
@@ -722,23 +697,17 @@ void connection::close()
 		link_.socket.lowest_layer().close();
 	}
 
-	if (lifecycle_ != cleanup) {
-		redispatch_send_queue();
-		lifecycle_ = cleanup;
-	}
+	redispatch_send_queue();
+	lifecycle_ = cleanup;
 }
 
 void connection::redispatch_send_queue()
 {
-	// We don't want to re-dispatch if we are already in cleanup because
-	// the node may have been destroyed
-	if (lifecycle_ != cleanup) {
-		for (std::deque<queued_packet>::iterator it = packet_queue_.begin(); it != packet_queue_.end(); ++it) {
-			if (it->pkt->is_direct())
-				// this was a direct request, turn it into an error so the requester gets notified
-				it->pkt->to_reply(packet::content_failure, boost::make_shared<payload_failure>(it->pkt->payload()->content_size()));
-			node_->dispatch(it->pkt);
-		}
+	for (std::deque<queued_packet>::iterator it = packet_queue_.begin(); it != packet_queue_.end(); ++it) {
+		if (it->pkt->is_direct())
+			// this was a direct request, turn it into an error so the requester gets notified
+			it->pkt->to_reply(packet::content_failure, boost::make_shared<payload_failure>(it->pkt->payload()->content_size()));
+		node_->dispatch(it->pkt);
 	}
 	packet_queue_.clear();
 }

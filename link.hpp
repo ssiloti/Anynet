@@ -170,7 +170,7 @@ public:
 		std::vector<mutable_buffer>::iterator begin = bufs.begin();
 		while (begin != bufs.end()) {
 			std::size_t consumed = std::min(valid_received_bytes(), buffer_size(*begin));
-			DLOG(INFO) << "Consuming " << consumed;
+//			DLOG(INFO) << "Consuming " << consumed;
 			std::memcpy(buffer_cast<void*>(*begin),
 			            buffer_cast<const void*>(received_buffer()),
 			            consumed);
@@ -202,7 +202,7 @@ public:
 #else
 		std::memmove(&receive_buffer_[0], &receive_buffer_[bytes], valid_receive_bytes_);
 #endif
-		DLOG(INFO) << "Consumed " << bytes << " bytes";
+//		DLOG(INFO) << "Consumed " << bytes << " bytes";
 	}
 
 	void received(std::size_t bytes)
@@ -211,7 +211,7 @@ public:
 		receive_buffer_.resize(valid_receive_bytes_ += bytes);
 #else
 		valid_receive_bytes_ += bytes;
-		DLOG(INFO) << "Received " << bytes << " bytes";
+//		DLOG(INFO) << "Received " << bytes << " bytes";
 #endif
 	}
 

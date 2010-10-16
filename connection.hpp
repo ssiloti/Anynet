@@ -214,10 +214,7 @@ public:
 private:
 	
 	connection(boost::shared_ptr<local_node> node, routing_type rtype);
-	void starting_connection();
-	void stillborn();
 
-private:
 	struct queued_packet
 	{
 		queued_packet(packet::ptr_t p, std::size_t o)
@@ -250,7 +247,6 @@ private:
 	};
 
 	const_buffer generate_handshake();
-//	bool parse_handshake();
 	void redispatch_send_queue();
 
 	void frame_head_received(const boost::system::error_code& error, std::size_t bytes_transfered);
@@ -296,6 +292,10 @@ private:
 	void send_next_frame();
 	void packet_sent(const boost::system::error_code& error, std::size_t bytes_transfered);
 	void frame_sent(frame_bits frame_bit, const boost::system::error_code& error, std::size_t bytes_transfered);
+
+	void starting_connection();
+	void stillborn();
+	void send_failure();
 
 	void connection_accepted(const boost::system::error_code& error, ip::tcp::acceptor& incoming);
 	void ssl_handshake(boost::asio::ssl::stream_base::handshake_type type, const boost::system::error_code& error);

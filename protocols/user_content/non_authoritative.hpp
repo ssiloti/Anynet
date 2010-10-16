@@ -69,7 +69,7 @@ public:
 		mapped_content::ptr backing;
 	};
 
-	static void create(local_node& node, boost::shared_ptr<transport::trivial> t);
+	static void create(boost::shared_ptr<local_node> node, boost::shared_ptr<transport::trivial> t);
 
 	insert_buffer get_insertion_buffer(std::size_t size);
 	content_identifier insert_hunk(insert_buffer hunk);
@@ -97,7 +97,7 @@ public:
 		stored_hunks_.unlink(content_identifier(id));
 	}
 
-	non_authoritative(local_node& node, boost::shared_ptr<transport::trivial> t);
+	non_authoritative(boost::shared_ptr<local_node> node, boost::shared_ptr<transport::trivial> t);
 	~non_authoritative()
 	{
 #ifdef SIMULATION
@@ -109,6 +109,8 @@ public:
 		}
 #endif
 	}
+
+	virtual void stop() { transport_->stop(); content_protocol::stop(); }
 
 private:
 	template <typename Handler>

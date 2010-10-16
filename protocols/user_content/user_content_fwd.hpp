@@ -40,7 +40,6 @@ namespace user_content
 {
 
 class content_protocol;
-class frame_fragment;
 
 }
 

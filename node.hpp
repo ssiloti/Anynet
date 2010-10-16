@@ -53,7 +53,7 @@
 
 class bad_content : public std::exception {};
 
-class local_node
+class local_node : public boost::enable_shared_from_this<local_node>
 {
 #ifdef SIMULATION
 	friend class traffic_generator;
@@ -64,6 +64,9 @@ class local_node
 public:
 	local_node(boost::asio::io_service& io_service, client_config& config);
 	~local_node();
+
+	void start();
+	void stop();
 
 	// getters
 	boost::asio::io_service& io_service()                        { return acceptor_.get_io_service(); }
@@ -185,6 +188,7 @@ private:
 	template <network_key dist_fn(const network_key& src, const network_key& dest)>
 	int closer_peers(const network_key& src, const network_key& dest) const;
 
+	bool running_;
 	client_config&           config_;
 	ip::tcp::acceptor        acceptor_;
 	boost::posix_time::ptime created_;

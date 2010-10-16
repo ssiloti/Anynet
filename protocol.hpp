@@ -82,7 +82,7 @@ protected:
 public:
 	typedef boost::shared_ptr<network_protocol> ptr_t;
 
-	network_protocol(local_node& node, protocol_id p);
+	network_protocol(boost::shared_ptr<local_node> node, protocol_id p);
 	virtual ~network_protocol() {}
 
 	protocol_id id() const { return protocol_; }
@@ -108,7 +108,7 @@ public:
 	void pickup_crumb(const content_identifier& cid, const boost::system::error_code& error);
 	boost::optional<const crumb::requesters_t&> get_crumb(packet::ptr_t pkt);
 
-	virtual void shutdown() { shutting_down_ = true; crumbs_.clear(); }
+	virtual void stop() { shutting_down_ = true; crumbs_.clear(); }
 
 	template <typename T>
 	boost::shared_ptr<T> shared_from_this_as() { return boost::static_pointer_cast<T>(shared_from_this()); }
@@ -129,7 +129,7 @@ protected:
 
 	void start_vacume();
 
-	local_node& node_;
+	boost::shared_ptr<local_node> node_;
 	network_key node_id;
 	content_requests_t recent_requests_;
 	content_sources_t content_sources_;

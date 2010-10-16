@@ -91,11 +91,11 @@ bool content_request::snoop_packet(content_protocol& manager, packet::ptr_t pkt)
 	case packet::content_failure:
 		if (!direct_request_pending_) {
 			pkt->destination(pkt->source());
-			pkt->source(manager.node_.id());
+			pkt->source(manager.node_->id());
 			pkt->content_status(packet::content_requested);
 			pkt->payload(boost::make_shared<payload_request>(content_size_));
 
-			connection::ptr_t con = manager.node_.local_request(pkt, last_indirect_request_peer_);
+			connection::ptr_t con = manager.node_->local_request(pkt, last_indirect_request_peer_);
 
 			if (con) {
 				DLOG(INFO) << "Retrying content_request for " << std::string(pkt->destination()) << " to " << std::string(con->remote_id()) << " with inner id " << std::string(last_indirect_request_peer_);

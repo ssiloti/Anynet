@@ -167,7 +167,7 @@ class indirect_credit : public network_protocol
 public:
 	static const protocol_id protocol_id = protocol_sha1_rsa_credits;
 
-	static void create(local_node& node)
+	static void create(boost::shared_ptr<local_node> node)
 	{
 		boost::shared_ptr<indirect_credit> ptr(new indirect_credit(node));
 		ptr->register_handler();
@@ -185,7 +185,7 @@ protected:
 	virtual void snoop_packet_payload(packet::ptr_t pkt);
 
 private:
-	indirect_credit(local_node& node);
+	indirect_credit(boost::shared_ptr<local_node> node);
 
 	void credits_received(connection::ptr_t con, packet::ptr_t pkt, const_buffer buf);
 

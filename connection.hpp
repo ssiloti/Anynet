@@ -52,24 +52,6 @@
 //#define FORCE_OOB_THRESHOLD 8000
 
 class local_node;
-class connection;
-
-class protocol_frame : public content_frame
-{
-public:
-	typedef boost::shared_ptr<protocol_frame> ptr_t;
-
-	virtual bool done(std::size_t bytes_transfered) = 0;
-	virtual void send_failure(local_node& node, const network_key& dest) = 0;
-
-protected:
-	struct packed_header
-	{
-		boost::uint8_t frame_type;
-		boost::uint8_t rsvd;
-		boost::uint8_t protocol[2];
-	};
-};
 
 class connection : public boost::enable_shared_from_this<connection>, boost::noncopyable
 {
@@ -146,7 +128,7 @@ public:
 		update_oob_threshold();
 	}
 
-	void disconnect();
+	void close();
 
 	void send(packet::ptr_t pkt, std::size_t oob_threshold_override = std::numeric_limits<std::size_t>::max());
 
@@ -226,12 +208,12 @@ public:
 	}
 #endif
 
-	static ptr_t connect(local_node& node, ip::tcp::endpoint peer, routing_type rtype);
-	static void accept(local_node& node, ip::tcp::acceptor& incoming);
+	static ptr_t connect(boost::shared_ptr<local_node> node, ip::tcp::endpoint peer, routing_type rtype);
+	static void accept(boost::shared_ptr<local_node> node, ip::tcp::acceptor& incoming);
 
 private:
 	
-	connection(local_node& node, routing_type rtype);
+	connection(boost::shared_ptr<local_node> node, routing_type rtype);
 	void starting_connection();
 	void stillborn();
 
@@ -284,7 +266,7 @@ private:
 			receive_next_frame();
 		}
 		else {
-			node_.receive_failure(shared_from_this());
+			node_->receive_failure(shared_from_this());
 		}
 	}
 
@@ -298,7 +280,7 @@ private:
 			receive_next_frame();
 		}
 		else {
-			node_.receive_failure(shared_from_this());
+			node_->receive_failure(shared_from_this());
 		}
 	}
 
@@ -327,7 +309,7 @@ private:
 	template <typename Adr>
 	bool do_parse_handshake();
 
-	local_node& node_;
+	boost::shared_ptr<local_node> node_;
 	net_link link_;
 
 	boost::uint32_t oob_threshold_;

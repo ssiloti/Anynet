@@ -44,20 +44,20 @@
 
 const boost::posix_time::time_duration network_protocol::min_successor_source_age = boost::posix_time::hours(1);
 
-network_protocol::network_protocol(local_node& node, protocol_id p)
+network_protocol::network_protocol(boost::shared_ptr<local_node> node, protocol_id p)
 	: node_(node)
 	, shutting_down_(false)
-	, vacume_sources_(node.io_service())
+	, vacume_sources_(node->io_service())
 	, protocol_(p)
 {
-	node_id = node.id();
+	node_id = node_->id();
 }
 
 void network_protocol::receive_payload(connection::ptr_t con, packet::ptr_t pkt, std::size_t payload_size)
 {
 	if (payload_size == 0 && pkt->content_status() != packet::content_attached) {
 		packet::ptr_t p;
-		node_.packet_received(con, p);
+		node_->packet_received(con, p);
 		return;
 	}
 
@@ -100,7 +100,7 @@ void network_protocol::request_from_location_failure(packet::ptr_t pkt)
 
 void network_protocol::register_handler()
 {
-	node_.register_protocol_handler(id(), shared_from_this());
+	node_->register_protocol_handler(id(), shared_from_this());
 }
 
 content_sources::ptr_t network_protocol::get_content_sources(content_identifier id, content_size_t size)
@@ -133,7 +133,7 @@ void network_protocol::drop_crumb(packet::ptr_t pkt, boost::weak_ptr<connection>
 {
 	std::pair<crumbs_t::iterator, bool> crumb_entry = crumbs_.insert(std::make_pair(pkt->content_id(), boost::shared_ptr<crumb>()));
 	if (crumb_entry.second) {
-		crumb_entry.first->second.reset(new crumb(node_.io_service()));
+		crumb_entry.first->second.reset(new crumb(node_->io_service()));
 		crumb_entry.first->second->timeout.async_wait(boost::bind(&network_protocol::pickup_crumb,
 		                                                          shared_from_this(),
 		                                                          pkt->content_id(),
@@ -152,7 +152,7 @@ void network_protocol::drop_crumb(packet::ptr_t pkt, boost::weak_ptr<connection>
 
 	requester_entry.first->second.min_oob_threshold = std::size_t(request->min_oob_threshold);
 
-	DLOG(INFO) << std::string(node_.id()) << " Dropping crmumb id "
+	DLOG(INFO) << std::string(node_->id()) << " Dropping crmumb id "
 	           << std::string(pkt->content_id().publisher) << ", " << std::string(pkt->requester()) << " source " << std::string(con.lock()->remote_id());
 }
 
@@ -167,7 +167,7 @@ void network_protocol::pickup_crumb(const content_identifier& cid, const boost::
 		crumbs_t::iterator crumb_trail = crumbs_.find(cid);
 
 		if (crumb_trail != crumbs_.end()) {
-			DLOG(INFO) << std::string(node_.id()) << " Picking up crmumb id " << std::string(cid.publisher);
+			DLOG(INFO) << std::string(node_->id()) << " Picking up crmumb id " << std::string(cid.publisher);
 			crumbs_.erase(crumb_trail);
 		}
 	}
@@ -188,7 +188,7 @@ void network_protocol::receive_attached_content(connection::ptr_t con, packet::p
 	// nodes should not be sending us attached content with a signature we don't understand
 	// report this as an error so the node can deal with the offending peer appropriately
 	packet::ptr_t p;
-	node_.packet_received(con, p);
+	node_->packet_received(con, p);
 }
 
 void network_protocol::sources_received(connection::ptr_t con, packet::ptr_t pkt, const_buffer buf)
@@ -197,19 +197,19 @@ void network_protocol::sources_received(connection::ptr_t con, packet::ptr_t pkt
 		payload_content_sources_v4::parse(pkt, buf, *this);
 	else
 		payload_content_sources_v6::parse(pkt, buf, *this);
-	node_.packet_received(con, pkt);
+	node_->packet_received(con, pkt);
 }
 
 void network_protocol::request_received(connection::ptr_t con, packet::ptr_t pkt, const_buffer buf)
 {
 	payload_request::parse(pkt, buf);
-	node_.packet_received(con, pkt);
+	node_->packet_received(con, pkt);
 }
 
 void network_protocol::failure_received(connection::ptr_t con, packet::ptr_t pkt, const_buffer buf)
 {
 	payload_failure::parse(pkt, buf);
-	node_.packet_received(con, pkt);
+	node_->packet_received(con, pkt);
 }
 
 void network_protocol::start_vacume()
@@ -226,10 +226,10 @@ void network_protocol::vacume_sources(const boost::system::error_code& error)
 {
 	if (!error && !shutting_down_) {
 		boost::posix_time::ptime now = boost::posix_time::second_clock::universal_time();
-		boost::posix_time::time_duration age_cap = node_.base_hunk_lifetime();
+		boost::posix_time::time_duration age_cap = node_->base_hunk_lifetime();
 
 		for (content_sources_t::iterator content = content_sources_.begin(); content != content_sources_.end();) {
-			bool successor = node_.closer_peers(content->first.publisher) == 0;
+			bool successor = node_->closer_peers(content->first.publisher) == 0;
 			for (content_sources::sources_t::iterator source = content->second->sources.begin()
 				; source != content->second->sources.end()
 				;)
@@ -263,5 +263,5 @@ void network_protocol::vacume_sources(const boost::system::error_code& error)
 		                                       placeholders::error));
 	}
 	else if (!error)
-		DLOG(INFO) << std::string(node_.id()) << ": Vacuming sources";
+		DLOG(INFO) << std::string(node_->id()) << ": Vacuming sources";
 }

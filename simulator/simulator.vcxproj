@@ -91,7 +91,6 @@
     <ClInclude Include="..\payload_failure.hpp" />
     <ClInclude Include="..\payload_request.hpp" />
     <ClInclude Include="..\payload_sources.hpp" />
-    <ClInclude Include="..\protocols\user_content\fragment.hpp" />
     <ClInclude Include="..\hunk.hpp" />
     <ClInclude Include="..\key.hpp" />
     <ClInclude Include="..\known_peers.hpp" />
@@ -102,7 +101,6 @@
     <ClInclude Include="..\peer_cache.hpp" />
     <ClInclude Include="..\protocol.hpp" />
     <ClInclude Include="..\protocols\indirect_credit.hpp" />
-    <ClInclude Include="..\protocols\user_content\fragmented_content.hpp" />
     <ClInclude Include="..\protocols\user_content\non_authoritative.hpp" />
     <ClInclude Include="..\protocols\user_content\payload_content_buffer.hpp" />
     <ClInclude Include="..\protocols\user_content\request.hpp" />
@@ -124,13 +122,9 @@
     <ClCompile Include="..\content_sources.cpp" />
     <ClCompile Include="..\core.cpp" />
     <ClCompile Include="..\payload_request.cpp" />
-    <ClCompile Include="..\protocols\user_content\fragment.cpp">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-    </ClCompile>
     <ClCompile Include="..\hunk.cpp" />
     <ClCompile Include="..\known_peers.cpp" />
     <ClCompile Include="..\node.cpp" />
-    <ClCompile Include="..\protocols\user_content\fragmented_content.cpp" />
     <ClCompile Include="..\protocols\user_content\non_authoritative.cpp" />
     <ClCompile Include="..\packet.cpp" />
     <ClCompile Include="..\peer_cache.cpp" />

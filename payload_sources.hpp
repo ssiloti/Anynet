@@ -34,6 +34,7 @@
 #ifndef PAYLOAD_SOURCES_HPP
 #define PAYLOAD_SOURCES_HPP
 
+#include "payload_failure.hpp"
 #include "protocol.hpp"
 #include "content_sources.hpp"
 #include "packet.hpp"
@@ -47,6 +48,20 @@ public:
 	virtual content_size_t content_size() const
 	{
 		return get()->size;
+	}
+
+	virtual boost::shared_ptr<const packet> trim(boost::shared_ptr<const packet> pkt, std::size_t threshold) const
+	{
+		if (get()->sources.empty()) {
+			// oops we removed all our sources before we has a chance to send them
+			// we don't have much choice in thie case, so just send a failure
+			packet::ptr_t failure_pkt(boost::make_shared<packet>(*pkt));
+			failure_pkt->content_status(packet::content_failure);
+			failure_pkt->payload(boost::make_shared<payload_failure>(get()->size));
+			return failure_pkt;
+		}
+		else
+			return pkt;
 	}
 
 	virtual std::vector<const_buffer> serialize(packet::const_ptr_t pkt, std::size_t threshold, mutable_buffer scratch) const

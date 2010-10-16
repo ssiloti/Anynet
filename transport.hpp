@@ -42,13 +42,13 @@ class local_node;
 class network_transport
 {
 public:
-	network_transport(transport_id i, local_node& n)
+	network_transport(transport_id i, boost::shared_ptr<local_node> n)
 		: id_(i), node_(n) {}
 
 	transport_id id();
 
 protected:
-	local_node& node_;
+	boost::shared_ptr<local_node> node_;
 
 private:
 	const transport_id id_;

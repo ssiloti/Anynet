@@ -101,7 +101,8 @@ namespace
 }
 
 local_node::local_node(boost::asio::io_service& io_service, client_config& config)
-	: config_(config)
+	: running_(false)
+	, config_(config)
 	, acceptor_(io_service, ip::tcp::endpoint(ip::address::from_string(config.listen_ip()), config.listen_port()))
 	, public_endpoint_(acceptor_.local_endpoint())
 	, created_(boost::posix_time::second_clock::universal_time())
@@ -118,24 +119,37 @@ local_node::local_node(boost::asio::io_service& io_service, client_config& confi
 	context.use_private_key_file(client_id_path.c_str(), boost::asio::ssl::context::pem);
 //	context.use_tmp_dh_file("dh512.pem");
 	::SSL_CTX_set_verify(context.impl(), SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT, verify_callback);
-
-	connection::accept(*this, acceptor_);
-	bootstrap();
 }
 
 local_node::~local_node()
 {
+
+}
+
+void local_node::start()
+{
+	running_ = true;
+	connection::accept(shared_from_this(), acceptor_);
+	bootstrap();
+}
+
+void local_node::stop()
+{
+	running_ = false;
 	while (!ib_peers_.empty()) {
 		// in-band peers need a little special handling to prevent them from re-dispatching packets to themselves
 		connection::ptr_t con = ib_peers_.back();
 		ib_peers_.pop_back();
-		con->disconnect();
+		con->close();
 	}
+
 	for (std::vector<connection::ptr_t>::iterator it = connecting_peers_.begin(); it != connecting_peers_.end(); ++it)
-		(*it)->disconnect();
+		(*it)->close();
 
 	for (protocol_handlers_t::iterator it = protocol_handlers_.begin(); it != protocol_handlers_.end(); ++it)
-		it->second->shutdown();
+		it->second->stop();
+
+	acceptor_.close();
 }
 
 template <network_key dist_fn(const network_key& src, const network_key& dest)>
@@ -319,6 +333,9 @@ local_node::sucessor(const network_key& key,
 
 void local_node::register_connection(connection::ptr_t con)
 {
+	if (!running_)
+		return;
+
 	if (con && con->is_connected()) {
 		DLOG(INFO) << "Connection established " << config_.listen_port() << ", " << con->remote_endpoint().port();
 
@@ -391,7 +408,7 @@ network_protocol::ptr_t local_node::validate_protocol(protocol_id protocol)
 
 	if (protocol_handler == protocol_handlers_.end())
 	{
-		protocol_handler = protocol_handlers_.insert(std::make_pair(protocol, boost::make_shared<network_protocol>(boost::ref(*this), protocol))).first;
+		protocol_handler = protocol_handlers_.insert(std::make_pair(protocol, boost::make_shared<network_protocol>(shared_from_this(), protocol))).first;
 	}
 
 	return protocol_handler->second;
@@ -446,6 +463,7 @@ void local_node::snoop(packet::ptr_t pkt)
 
 	if (protocol_handler == protocol_handlers_.end()) {
 		// TODO: Turn the packet around with an error, for now just drop it
+		google::FlushLogFiles(google::INFO);
 		DLOG(INFO) << "Unknown packet signature format! " << pkt->protocol();
 		return;
 	}
@@ -734,7 +752,7 @@ void local_node::make_connection(ip::tcp::endpoint peer)
 		if ((*it)->remote_endpoint() == peer && (*it)->accepts_ib_traffic())
 			return;
 
-	connection::connect(*this, peer, connection::ib);
+	connection::connect(shared_from_this(), peer, connection::ib);
 }
 
 boost::posix_time::time_duration local_node::base_hunk_lifetime()
@@ -833,7 +851,7 @@ void local_node::disconnect_peer(connection::ptr_t con)
 		if (peer != disconnecting_peers_.end())
 			disconnecting_peers_.erase(peer);
 
-		con->disconnect();
+		con->close();
 	}
 }
 

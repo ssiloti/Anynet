@@ -45,7 +45,7 @@ namespace
 	};
 }
 
-void non_authoritative::create(local_node& node, boost::shared_ptr<transport::trivial> t)
+void non_authoritative::create(boost::shared_ptr<local_node> node, boost::shared_ptr<transport::trivial> t)
 {
 	boost::shared_ptr<non_authoritative> ptr(boost::make_shared<non_authoritative>(boost::ref(node), t));
 	ptr->register_handler();
@@ -80,9 +80,9 @@ const_buffer non_authoritative::insert_buffer::get() const
 	return backing->get() + sizeof(packed_content);
 }
 
-non_authoritative::non_authoritative(local_node& node, boost::shared_ptr<transport::trivial> t)
+non_authoritative::non_authoritative(boost::shared_ptr<local_node> node, boost::shared_ptr<transport::trivial> t)
 	: user_content::content_protocol(node, protocol_id, t->public_endpoint())
-	, stored_hunks_(node.config().content_store_path() + "/non_authoritative", protocol_id, node)
+	, stored_hunks_(node->config().content_store_path() + "/non_authoritative", protocol_id, *node)
 	, transport_(t)
 {}
 
@@ -96,8 +96,8 @@ content_identifier non_authoritative::insert_hunk(insert_buffer hunk)
 	content_identifier cid(content_id(hunk.backing->get()));
 	// Since the user is requesting an insertion while providing just a buffer, we need to make sure the
 	// content gets inserted into the local store so we can serve it up to requesters
-	hunk_descriptor_t hunk_desc = node_.cache_local_request(id(), cid, buffer_size(hunk.backing->get()));
-	if (hunk_desc != node_.not_a_hunk())
+	hunk_descriptor_t hunk_desc = node_->cache_local_request(id(), cid, buffer_size(hunk.backing->get()));
+	if (hunk_desc != node_->not_a_hunk())
 		store_content(hunk_desc, hunk.backing);
 	new_content_store(cid, hunk.backing);
 	return cid;
@@ -134,7 +134,7 @@ content_identifier non_authoritative::content_id(const_buffer content)
 
 void non_authoritative::start_direct_request(const content_identifier& cid, boost::shared_ptr<content_sources> sources)
 {
-	transport_->start_request(node_, id(), cid, sources);
+	transport_->start_request(id(), cid, sources);
 }
 
 void non_authoritative::stop_direct_request(const content_identifier& cid)

@@ -31,6 +31,7 @@
 //
 // Contact:  Steven Siloti <ssiloti@gmail.com>
 
+#include "payload_failure.hpp"
 #include "connection.hpp"
 #include "node.hpp"
 #include "config.hpp"
@@ -81,9 +82,9 @@ namespace
 	};
 }
 
-connection::connection(local_node& node, routing_type rtype)
+connection::connection(boost::shared_ptr<local_node> node, routing_type rtype)
 	: node_(node)
-	, link_(node.io_service(), node.context)
+	, link_(node->io_service(), node->context)
 	, routing_type_(rtype)
 	, incoming_port_(0)
 	, lifecycle_(connecting)
@@ -93,7 +94,7 @@ connection::connection(local_node& node, routing_type rtype)
 	, outstanding_non_packet_frames_(0)
 	, ack_sends_needed_(0)
 #ifdef SIMULATION
-	, send_delay_(node.io_service(), boost::posix_time::ptime(boost::date_time::not_a_date_time))
+	, send_delay_(node->io_service(), boost::posix_time::ptime(boost::date_time::not_a_date_time))
 #endif
 {
 
@@ -107,7 +108,7 @@ ip::tcp::endpoint connection::remote_endpoint() const
 
 void connection::starting_connection()
 {
-	node_.connection_in_progress(shared_from_this());
+	node_->connection_in_progress(shared_from_this());
 }
 
 void connection::stillborn()
@@ -115,13 +116,13 @@ void connection::stillborn()
 	DLOG(INFO) << "Error while establishing connection";
 	if (lifecycle_ != cleanup) {
 		lifecycle_ = cleanup;
-		node_.register_connection(shared_from_this());
+		node_->register_connection(shared_from_this());
 	}
 }
 
-connection::ptr_t connection::connect(local_node& node, ip::tcp::endpoint peer, routing_type rtype)
+connection::ptr_t connection::connect(boost::shared_ptr<local_node> node, ip::tcp::endpoint peer, routing_type rtype)
 {
-	DLOG(INFO) << "Connecting: " << node.public_endpoint().port() << ", " << peer.address() << ':' << peer.port();
+	DLOG(INFO) << "Connecting: " << node->public_endpoint().port() << ", " << peer.address() << ':' << peer.port();
 	ptr_t con(new connection(node, rtype));
 	con->starting_connection();
 	con->incoming_port_ = peer.port();
@@ -132,7 +133,7 @@ connection::ptr_t connection::connect(local_node& node, ip::tcp::endpoint peer, 
 	return con;
 }
 
-void connection::accept(local_node& node, ip::tcp::acceptor& incoming)
+void connection::accept(boost::shared_ptr<local_node> node, ip::tcp::acceptor& incoming)
 {
 	ptr_t con(new connection(node, ib));
 	con->starting_connection();
@@ -158,7 +159,7 @@ void connection::connection_accepted(const boost::system::error_code& error, ip:
 	}
 	else {
 		if (lifecycle_ != cleanup) {
-			disconnect();
+			close();
 			stillborn();
 		}
 	}
@@ -167,7 +168,7 @@ void connection::connection_accepted(const boost::system::error_code& error, ip:
 void connection::ssl_handshake(boost::asio::ssl::stream_base::handshake_type type, const boost::system::error_code& error)
 {
 	if (error && lifecycle_ != cleanup) {
-		disconnect();
+		close();
 		stillborn();
 		return;
 	}
@@ -190,7 +191,7 @@ void connection::write_handshake(const boost::system::error_code& error)
 	}
 	else {
 		if (lifecycle_ != cleanup) {
-			disconnect();
+			close();
 			stillborn();
 		}
 	}
@@ -216,7 +217,7 @@ void connection::read_handshake(const boost::system::error_code& error, std::siz
 	}
 	else {
 		if (lifecycle_ != cleanup) {
-			disconnect();
+			close();
 			stillborn();
 		}
 	}
@@ -225,7 +226,7 @@ void connection::read_handshake(const boost::system::error_code& error, std::siz
 template <typename Adr>
 const_buffer connection::do_generate_handshake()
 {
-	const std::vector<protocol_id>& protocols = node_.supported_protocols();
+	const std::vector<protocol_id>& protocols = node_->supported_protocols();
 	link_handshake<Adr>* handshake = buffer_cast<link_handshake<Adr>*>( link_.send_buffer(sizeof(link_handshake<Adr>)
 	                                                                    + (protocols.size() - 1) * 2) );
 	std::memcpy(handshake->sig, handshake_signature, sizeof(handshake->sig));
@@ -235,7 +236,7 @@ const_buffer connection::do_generate_handshake()
 	typename Adr::bytes_type peer_ip = to<Adr>(link_.socket.lowest_layer().remote_endpoint().address()).to_bytes();
 	std::memcpy(handshake->remote_ip, peer_ip.data(), peer_ip.size());
 
-	u16(handshake->incoming_port, node_.config().listen_port());
+	u16(handshake->incoming_port, node_->config().listen_port());
 
 	handshake->supported_protocol_count = protocols.size();
 	for (std::vector<protocol_id>::const_iterator protocol = protocols.begin(); protocol != protocols.end(); ++protocol) {
@@ -281,7 +282,7 @@ void connection::handshake_received(const boost::system::error_code& error, std:
 {
 	if (error || lifecycle_ != connecting) {
 		if (lifecycle_ != cleanup) {
-			disconnect();
+			close();
 			stillborn();
 		}
 		return;
@@ -320,7 +321,7 @@ void connection::complete_connection(const boost::system::error_code& error, std
 {
 	if (error || lifecycle_ != connecting) {
 		if (lifecycle_ != cleanup) {
-			disconnect();
+			close();
 			stillborn();
 		}
 		return;
@@ -338,7 +339,7 @@ void connection::complete_connection(const boost::system::error_code& error, std
 
 	established_ = boost::posix_time::second_clock::universal_time();
 	DLOG(INFO) << "Connected with cipher: " << ::SSL_CIPHER_get_name(::SSL_get_current_cipher(link_.socket.impl()->ssl)); //<< " and compression: " << ::SSL_COMP_get_name(::SSL_get_current_compression(link_.socket.impl()->ssl));
-	node_.register_connection(shared_from_this());
+	node_->register_connection(shared_from_this());
 
 	if (accepts_ib_traffic())
 		outstanding_non_packet_frames_ |= frame_bit_successor_request;
@@ -354,7 +355,7 @@ void connection::send(packet::ptr_t pkt, std::size_t oob_threshold_override)
 		send_next_frame();
 	}
 	else
-		DLOG(INFO) << "Queued packet from " << std::string(node_.id()) << " to " << std::string(remote_id());
+		DLOG(INFO) << "Queued packet from " << std::string(node_->id()) << " to " << std::string(remote_id());
 }
 
 void connection::receive_next_frame()
@@ -379,13 +380,13 @@ void connection::frame_head_received(const boost::system::error_code& error, std
 {
 	if (error || lifecycle_ != connected) {
 		DLOG(INFO) << "Error receiving frame";
-		node_.receive_failure(shared_from_this());
+		node_->receive_failure(shared_from_this());
 		return;
 	}
 
 	link_.received(bytes_transfered);
 
-	DLOG(INFO) << std::string(node_.id()) << " Recieved " << bytes_transfered << " bytes, total buffered: " << link_.valid_received_bytes();
+	DLOG(INFO) << std::string(node_->id()) << " Recieved " << bytes_transfered << " bytes, total buffered: " << link_.valid_received_bytes();
 
 	while (link_.valid_received_bytes())
 	{
@@ -417,7 +418,7 @@ void connection::frame_head_received(const boost::system::error_code& error, std
 		case frame_successor_request:
 			{
 				if (link_.valid_received_bytes() >= 4) {
-					DLOG(INFO) << std::string(node_.id()) << "Sending successor";
+					DLOG(INFO) << std::string(node_->id()) << "Sending successor";
 					send_next_frame(frame_bit_successor);
 					link_.consume_receive_buffer(4);
 					break;
@@ -453,7 +454,7 @@ void connection::frame_head_received(const boost::system::error_code& error, std
 			{
 				DLOG(INFO) << "Unknown frame type: " << buffer_cast<const boost::uint8_t*>(link_.received_buffer())[0];
 				google::FlushLogFiles(google::INFO);
-				node_.receive_failure(shared_from_this());
+				node_->receive_failure(shared_from_this());
 				return;
 			}
 		}
@@ -464,7 +465,7 @@ void connection::frame_head_received(const boost::system::error_code& error, std
 
 void connection::incoming_packet(packet::ptr_t pkt, std::size_t payload_size)
 {
-	node_.incoming_packet(shared_from_this(), pkt, payload_size);
+	node_->incoming_packet(shared_from_this(), pkt, payload_size);
 	if (!payload_size) {
 		receive_next_frame();
 	}
@@ -478,7 +479,7 @@ std::size_t connection::oob_threshold_size()
 void connection::parse_oob_threshold()
 {
 	const oob_threshold_frame* frame = buffer_cast<const oob_threshold_frame*>(link_.received_buffer());
-	// OOB threshold updates double as an ACK for content related messages (network packets, fragments)
+	// OOB threshold updates double as an ACK for network packets
 	// This is strictly for timing purposes. Idealy we could use the TCP ack for this but operating systems
 	// don't provide that capability.
 	for (unsigned acks_remaining = frame->ack; acks_remaining != 0; --acks_remaining) {
@@ -516,7 +517,7 @@ void connection::update_oob_threshold()
 	if (oob_threshold_ < min_oob_threshold)
 		oob_threshold_ = min_oob_threshold;
 #endif
-	node_.update_threshold_stats();
+	node_->update_threshold_stats();
 	send_next_frame(frame_bit_oob_threshold_update);
 }
 
@@ -557,9 +558,9 @@ void connection::parse_successor()
 
 #if 0
 	if (successor.port() == remote_endpoint().port())
-		sim.verify_reverse_successor(node_.id(), remote_id());
+		sim.verify_reverse_successor(node_->id(), remote_id());
 #endif
-	node_.make_connection(successor);
+	node_->make_connection(successor);
 }
 
 template <typename Addr>
@@ -617,10 +618,10 @@ void connection::send_next_frame()
 		                                     frame_bit_successor_request,
 		                                     placeholders::error,
 		                                     placeholders::bytes_transferred));
-		DLOG(INFO) << std::string(node_.id()) << " Wrote " << 4 << " bytes to " << std::string(remote_id()).substr(0, 4);
+		DLOG(INFO) << std::string(node_->id()) << " Wrote " << 4 << " bytes to " << std::string(remote_id()).substr(0, 4);
 	}
 	else if (outstanding_non_packet_frames_ & frame_bit_successor) {
-		ip::tcp::endpoint successor = node_.successor_endpoint(remote_identity_);
+		ip::tcp::endpoint successor = node_->successor_endpoint(remote_identity_);
 
 		if (successor.address().is_v4())
 			do_generate_successor_frame(link_, successor.address().to_v4(), successor.port());
@@ -634,10 +635,10 @@ void connection::send_next_frame()
 		                                     frame_bit_successor,
 		                                     placeholders::error,
 		                                     placeholders::bytes_transferred));
-		DLOG(INFO) << std::string(node_.id()) << " Wrote " << buffer_size(link_.sendable_buffer()) << " bytes to " << std::string(remote_id()).substr(0, 4);
+		DLOG(INFO) << std::string(node_->id()) << " Wrote " << buffer_size(link_.sendable_buffer()) << " bytes to " << std::string(remote_id()).substr(0, 4);
 	}
 	else if (!packet_queue_.empty()) {
-		DLOG(INFO) << "Sending packet from " << std::string(node_.id()) << " to " << std::string(remote_id());
+		DLOG(INFO) << "Sending packet from " << std::string(node_->id()) << " to " << std::string(remote_id());
 
 		std::size_t threshold
 			= packet_queue_.front().oob_threshold_override == std::numeric_limits<std::size_t>::max()
@@ -675,19 +676,19 @@ void connection::send_next_frame()
 void connection::packet_sent(const boost::system::error_code& error, std::size_t bytes_transfered)
 {
 	if (!error && link_.socket.lowest_layer().is_open()) {
-		DLOG(INFO) << std::string(node_.id()) << " Sent " << bytes_transfered << " bytes of packet content";
+		DLOG(INFO) << std::string(node_->id()) << " Sent " << bytes_transfered << " bytes of packet content";
 
-		node_.sent_content(remote_id(), bytes_transfered);
+		node_->sent_content(remote_id(), bytes_transfered);
 		packet_queue_.pop_front();
 
 		send_next_frame();
 	}
 	else {
-		DLOG(INFO) << std::string(node_.id()) << " Failed sending packet";
+		DLOG(INFO) << std::string(node_->id()) << " Failed sending packet";
 		if (lifecycle_ != cleanup) {
 			lifecycle_ = disconnecting;
 			link_.socket.lowest_layer().shutdown(ip::tcp::socket::shutdown_send);
-			node_.send_failure(shared_from_this());
+			node_->send_failure(shared_from_this());
 			redispatch_send_queue();
 		}
 	}
@@ -703,7 +704,7 @@ void connection::frame_sent(frame_bits frame_bit, const boost::system::error_cod
 		if (lifecycle_ == connected) {
 			lifecycle_ = disconnecting;
 			link_.socket.lowest_layer().shutdown(ip::tcp::socket::shutdown_send);
-			node_.send_failure(shared_from_this());
+			node_->send_failure(shared_from_this());
 			redispatch_send_queue();
 		}
 		return;
@@ -712,7 +713,7 @@ void connection::frame_sent(frame_bits frame_bit, const boost::system::error_cod
 	send_next_frame();
 }
 
-void connection::disconnect()
+void connection::close()
 {
 	if (link_.socket.lowest_layer().is_open()) {
 	//	link_.socket.async_shutdown(boost::bind(&connection::link_shutdown, shared_from_this()));
@@ -735,8 +736,8 @@ void connection::redispatch_send_queue()
 		for (std::deque<queued_packet>::iterator it = packet_queue_.begin(); it != packet_queue_.end(); ++it) {
 			if (it->pkt->is_direct())
 				// this was a direct request, turn it into an error so the requester gets notified
-				it->pkt->to_reply(packet::content_failure);
-			node_.dispatch(it->pkt);
+				it->pkt->to_reply(packet::content_failure, boost::make_shared<payload_failure>(it->pkt->payload()->content_size()));
+			node_->dispatch(it->pkt);
 		}
 	}
 	packet_queue_.clear();

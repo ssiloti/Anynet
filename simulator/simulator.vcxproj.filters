@@ -90,16 +90,10 @@
     <ClInclude Include="..\content.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\protocols\user_content\fragment.hpp">
-      <Filter>Header Files\Protocols\User Content</Filter>
-    </ClInclude>
     <ClInclude Include="..\protocols\user_content\non_authoritative.hpp">
       <Filter>Header Files\Protocols\User Content</Filter>
     </ClInclude>
     <ClInclude Include="..\protocols\user_content\user_content_fwd.hpp">
-      <Filter>Header Files\Protocols\User Content</Filter>
-    </ClInclude>
-    <ClInclude Include="..\protocols\user_content\fragmented_content.hpp">
       <Filter>Header Files\Protocols\User Content</Filter>
     </ClInclude>
     <ClInclude Include="..\protocols\user_content\request.hpp">
@@ -185,13 +179,7 @@
     <ClCompile Include="..\protocols\indirect_credit.cpp">
       <Filter>Source Files\Protocols</Filter>
     </ClCompile>
-    <ClCompile Include="..\protocols\user_content\fragment.cpp">
-      <Filter>Source Files\Protocols\User Content</Filter>
-    </ClCompile>
     <ClCompile Include="..\protocols\user_content\non_authoritative.cpp">
-      <Filter>Source Files\Protocols\User Content</Filter>
-    </ClCompile>
-    <ClCompile Include="..\protocols\user_content\fragmented_content.cpp">
       <Filter>Source Files\Protocols\User Content</Filter>
     </ClCompile>
     <ClCompile Include="..\protocols\user_content\request.cpp">

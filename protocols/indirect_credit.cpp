@@ -351,15 +351,15 @@ bool credit_store::store_credit(const authority& creditor,
 	return true;
 }
 
-indirect_credit::indirect_credit(local_node& node)
-	: network_protocol(node, protocol_id), store_(node.io_service(), node.config().content_store_path() + "/indirect_credits")
+indirect_credit::indirect_credit(boost::shared_ptr<local_node> node)
+	: network_protocol(node, protocol_id), store_(node->io_service(), node->config().content_store_path() + "/indirect_credits")
 {}
 
 void indirect_credit::receive_attached_content(connection::ptr_t con, packet::ptr_t pkt, std::size_t payload_size)
 {
 	if (payload_size == 0) {
 		packet::ptr_t p;
-		node_.packet_received(con, p);
+		node_->packet_received(con, p);
 		return;
 	}
 
@@ -384,8 +384,8 @@ void indirect_credit::snoop_packet_payload(packet::ptr_t pkt)
 	switch (pkt->content_status())
 	{
 		case packet::content_requested:
-			if (pkt->destination() == node_.id())
-				pkt->to_reply(packet::content_attached, boost::make_shared<payload_credits<known_peers> >(node_.get_known_peers()));
+			if (pkt->destination() == node_->id())
+				pkt->to_reply(packet::content_attached, boost::make_shared<payload_credits<known_peers> >(node_->get_known_peers()));
 			break;
 	}
 }
@@ -393,5 +393,5 @@ void indirect_credit::snoop_packet_payload(packet::ptr_t pkt)
 void indirect_credit::credits_received(connection::ptr_t con, packet::ptr_t pkt, const_buffer buf)
 {
 	payload_credits<credit_store>::parse(pkt, buf, store_);
-	node_.packet_received(con, pkt);
+	node_->packet_received(con, pkt);
 }

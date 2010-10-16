@@ -38,7 +38,6 @@
 
 #include "transports/trivial/trivial_transport.hpp"
 #include "user_content_fwd.hpp"
-#include "fragmented_content.hpp"
 #include "request.hpp"
 #include <hunk.hpp>
 #include <protocol.hpp>
@@ -79,10 +78,10 @@ public:
 	virtual void content_finished(const content_identifier& cid, const_payload_buffer_ptr content);
 	virtual const_payload_buffer_ptr get_content(const content_identifier& key) { return const_payload_buffer_ptr(); }
 
-	virtual void shutdown() { network_protocol::shutdown(); vacume_sources_.cancel(); response_handlers_.clear(); }
+	virtual void stop() { network_protocol::stop(); vacume_sources_.cancel(); response_handlers_.clear(); }
 
 protected:
-	content_protocol(local_node& node, protocol_id p, ip::tcp::endpoint public_endpoint);
+	content_protocol(boost::shared_ptr<local_node> node, protocol_id p, ip::tcp::endpoint public_endpoint);
 
 	virtual void snoop_packet_payload(packet::ptr_t pkt);
 

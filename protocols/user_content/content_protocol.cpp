@@ -31,7 +31,6 @@
 //
 // Contact:  Steven Siloti <ssiloti@gmail.com>
 
-#include "fragment.hpp"
 #include "payload_content_buffer.hpp"
 #include "content_protocol.hpp"
 #include <payload_sources.hpp>
@@ -45,7 +44,7 @@
 
 using namespace user_content;
 
-content_protocol::content_protocol(local_node& node, protocol_id p, ip::tcp::endpoint public_endpoint)
+content_protocol::content_protocol(boost::shared_ptr<local_node> node, protocol_id p, ip::tcp::endpoint public_endpoint)
 	: network_protocol(node, p), public_transport_endpoint_(public_endpoint)
 {}
 
@@ -92,25 +91,25 @@ void content_protocol::snoop_packet_payload(packet::ptr_t pkt)
 			pkt->source(cid.publisher);
 			pkt->name(cid.name);
 			if (pkt->is_direct()) {
-				hunk_desc = node_.cache_local_request(id(),
-				                                      pkt->content_id(),
-				                                      buffer_size(pkt->payload_as<payload_content_buffer>()->payload->get()));
+				hunk_desc = node_->cache_local_request(id(),
+				                                       pkt->content_id(),
+				                                       buffer_size(pkt->payload_as<payload_content_buffer>()->payload->get()));
 			}
 			else if (pkt->source() == pkt->destination())
-				hunk_desc = node_.cache_store(id(),
-				                              pkt->content_id(),
-				                              buffer_size(pkt->payload_as<payload_content_buffer>()->payload->get()));
+				hunk_desc = node_->cache_store(id(),
+				                               pkt->content_id(),
+				                               buffer_size(pkt->payload_as<payload_content_buffer>()->payload->get()));
 			else {
 				content_requests_t::iterator recent_request = recent_requests_.find(pkt->content_id());
 				if (recent_request == recent_requests_.end() || recent_request->second[1].is_not_a_date_time())
 					break;
-				hunk_desc = node_.cache_remote_request(id(),
-				                                       pkt->content_id(),
-				                                       buffer_size(pkt->payload_as<payload_content_buffer>()->payload->get()),
-				                                       recent_request->second[0] - recent_request->second[1]);
+				hunk_desc = node_->cache_remote_request(id(),
+				                                        pkt->content_id(),
+				                                        buffer_size(pkt->payload_as<payload_content_buffer>()->payload->get()),
+				                                        recent_request->second[0] - recent_request->second[1]);
 			}
 
-			if (hunk_desc != node_.not_a_hunk())
+			if (hunk_desc != node_->not_a_hunk())
 				store_content(hunk_desc, pkt->payload_as<payload_content_buffer>()->payload);
 			break;
 		}
@@ -120,7 +119,7 @@ void content_protocol::snoop_packet_payload(packet::ptr_t pkt)
 				// this is a store request and we already have other sources saved
 				// in this case we want to halt the store request so set the destination to ourselves
 				// this will prevent the packet from being forwarded to another peer
-				pkt->destination(node_.id());
+				pkt->destination(node_->id());
 			}
 			break;
 		}
@@ -137,13 +136,13 @@ void content_protocol::snoop_packet_payload(packet::ptr_t pkt)
 		content_requests_t::iterator recent_request = recent_requests_.find(pkt->content_id());
 		content_size_t content_size = pkt->payload_as<boost::shared_ptr<content_sources> >()->get()->size;
 		if (!(recent_request == recent_requests_.end() || recent_request->second[1].is_not_a_date_time())
-		    && content_size <= node_.average_oob_threshold()) {
+		    && content_size <= node_->average_oob_threshold()) {
 			hunk_descriptor_t hunk_desc;
-			hunk_desc = node_.cache_remote_request(id(),
+			hunk_desc = node_->cache_remote_request(id(),
 			                                       pkt->content_id(),
 			                                       std::size_t(content_size),
 			                                       recent_request->second[0] - recent_request->second[1]);
-			if (hunk_desc != node_.not_a_hunk()) {
+			if (hunk_desc != node_->not_a_hunk()) {
 				// We have detached sources, the associated content has been requested at least twice,
 				// the content is small enough for us to send in-band, and we have enough cache space
 				// to store it. Lets go ahead an start a request for the content so we can attach it
@@ -184,8 +183,9 @@ void content_protocol::content_finished(const content_identifier& cid, const_pay
 
 	if (request != response_handlers_.end()) {
 		boost::shared_ptr<packet> pkt(boost::make_shared<packet>());
+		pkt->protocol(id());
 		pkt->source(cid.publisher);
-		pkt->destination(node_.id());
+		pkt->destination(node_->id());
 		pkt->name(cid.name);
 		if (content) {
 			pkt->content_status(packet::content_attached);
@@ -221,7 +221,7 @@ void content_protocol::receive_attached_content(connection::ptr_t con, packet::p
 
 void content_protocol::content_received(connection::ptr_t con, packet::ptr_t pkt)
 {
-	node_.packet_received(con, pkt);
+	node_->packet_received(con, pkt);
 }
 
 void content_protocol::new_content_request(const content_identifier& key,
@@ -232,7 +232,7 @@ void content_protocol::new_content_request(const content_identifier& key,
 		rh = response_handlers_.insert(std::make_pair(key, boost::shared_ptr<response_handler>()));
 
 	if (rh.second) {
-		rh.first->second = boost::make_shared<response_handler>(boost::ref(node_.io_service()));
+		rh.first->second = boost::make_shared<response_handler>(boost::ref(node_->io_service()));
 		rh.first->second->timeout.async_wait(boost::bind(&content_protocol::remove_response_handler,
 		                                                 shared_from_this_as<content_protocol>(),
 		                                                 rh.first->first,
@@ -243,7 +243,7 @@ void content_protocol::new_content_request(const content_identifier& key,
 		rh.first->second->request.add_handler(handler);
 
 	if (rh.second)
-		rh.first->second->request.initiate_request(id(), key, node_, content_size);
+		rh.first->second->request.initiate_request(id(), key, *node_, content_size);
 }
 
 void content_protocol::new_content_store(content_identifier cid, const_payload_buffer_ptr hunk)
@@ -262,14 +262,14 @@ void content_protocol::new_content_store(content_identifier cid, const_payload_b
 	pkt->protocol(id());
 	pkt->content_status(packet::content_detached);
 	pkt->payload(self_source(buffer_size(hunk->get())));
-	node_.local_request(pkt);
+	node_->local_request(pkt);
 }
 
 packet::payload_ptr_t content_protocol::self_source(std::size_t content_size)
 {
 	content_sources::ptr_t self(boost::make_shared<content_sources>(content_size));
-	self->sources.insert(std::make_pair(node_.id(), content_sources::source(public_transport_endpoint_)));
-	if (node_.is_v4())
+	self->sources.insert(std::make_pair(node_->id(), content_sources::source(public_transport_endpoint_)));
+	if (node_->is_v4())
 		return boost::make_shared<payload_content_sources_v4>(self);
 	else
 		return boost::make_shared<payload_content_sources_v6>(self);
@@ -278,7 +278,7 @@ packet::payload_ptr_t content_protocol::self_source(std::size_t content_size)
 void content_protocol::remove_response_handler(content_identifier key, const boost::system::error_code& error)
 {
 	if (!error) {
-		DLOG(INFO) << std::string(node_.id()) << ": Removing response handler " << std::string(key.publisher);
+		DLOG(INFO) << std::string(node_->id()) << ": Removing response handler " << std::string(key.publisher);
 		response_handlers_t::iterator iter = response_handlers_.find(key);
 		if (iter != response_handlers_.end()) {
 			google::FlushLogFiles(google::INFO);
@@ -287,7 +287,7 @@ void content_protocol::remove_response_handler(content_identifier key, const boo
 			pkt->content_status(packet::content_failure);
 			pkt->source(key.publisher);
 			pkt->name(key.name);
-			pkt->destination(node_.id());
+			pkt->destination(node_->id());
 			pkt->payload(boost::make_shared<payload_failure>(0));
 			if (iter->second->request.timeout(*this, pkt))
 				// request has nothing more to do, put him out of his misery
@@ -307,7 +307,7 @@ void content_protocol::remove_response_handler(content_identifier key, const boo
 void content_protocol::completed_detached_content_request(hunk_descriptor_t desc, const_payload_buffer_ptr content)
 {
 	if (!content)
-		node_.erase_hunk(desc);
+		node_->erase_hunk(desc);
 	else
 		store_content(desc, content);
 }

@@ -40,13 +40,16 @@
 #include <boost/bind/protect.hpp>
 #include <boost/make_shared.hpp>
 
+#define SIMULATOR_KILL_CLIENTS TRUE
+
 traffic_generator::traffic_generator(boost::asio::io_service& io_service, int id)
 	: config_(id)
-	, node_(io_service, config_)
+	, node_(boost::make_shared<local_node>(boost::ref(io_service), boost::ref(config_)))
 	, next_non_authoritative_insert_(sim.insert_non_authoritative_interval())
 	, next_non_authoritative_get_(sim.get_non_authoritative_interval())
 	, death_(sim.node_lifetime())
 {
+	node_->start();
 	peer_cache.add_peer(ip::tcp::endpoint(ip::address::from_string("127.0.0.1"), config_.listen_port()));
 
 	boost::shared_ptr<transport::trivial> trivial_transport(boost::make_shared<transport::trivial>(boost::ref(node_)));
@@ -57,12 +60,14 @@ traffic_generator::traffic_generator(boost::asio::io_service& io_service, int id
 
 void traffic_generator::tick(int time)
 {
-	//if (time == death_) {
-	//	sim.kill_node(shared_from_this());
-	//	return;
-	//}
+#if SIMULATOR_KILL_CLIENTS
+	if (time == death_) {
+		sim.kill_node(shared_from_this());
+		return;
+	}
+#endif
 	if (time == next_non_authoritative_insert_) {
-		non_authoritative& non_auth = node_.protocol<non_authoritative>();
+		non_authoritative& non_auth = node_->protocol<non_authoritative>();
 		std::stringstream content;
 		content << config_.listen_port() << time;
 		non_authoritative::insert_buffer payload = non_auth.get_insertion_buffer(content.str().size());
@@ -75,8 +80,8 @@ void traffic_generator::tick(int time)
 		network_key hunk_id = sim.get_non_authoritative();
 		if (hunk_id != key_max) {
 			sim.begin_query();
-			DLOG(INFO) << "Node id=" << std::string(node_.id()) << " Requesting non-authoritative hunk id=" << std::string(hunk_id);
-			non_authoritative& non_auth = node_.protocol<non_authoritative>();
+			DLOG(INFO) << "Node id=" << std::string(node_->id()) << " Requesting non-authoritative hunk id=" << std::string(hunk_id);
+			non_authoritative& non_auth = node_->protocol<non_authoritative>();
 			non_auth.retrieve_hunk(content_identifier(hunk_id), boost::protect(boost::bind(&traffic_generator::hunk_received, this, _1)));
 		}
 		next_non_authoritative_get_ = sim.get_non_authoritative_interval();
@@ -86,11 +91,11 @@ void traffic_generator::tick(int time)
 void traffic_generator::hunk_received(const_payload_buffer_ptr content)
 {
 	if (content) {
-		DLOG(INFO) << "Node id=" << std::string(node_.id()) << " Successfully retrieved non-authoritative hunk id=" << std::string(network_key(content->get()));
+		DLOG(INFO) << "Node id=" << std::string(node_->id()) << " Successfully retrieved non-authoritative hunk id=" << std::string(network_key(content->get()));
 		sim.sucessful_retrieval();
 	}
 	else {
-		DLOG(INFO) << std::string(node_.id()) << ": Failed to retrieve non-authoritative hunk";
+		DLOG(INFO) << std::string(node_->id()) << ": Failed to retrieve non-authoritative hunk";
 		google::FlushLogFiles(google::INFO);
 		sim.failed_non_authoritative_retrieval();
 	}

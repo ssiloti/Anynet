@@ -81,7 +81,7 @@ namespace
 
 trivial::connection::connection(boost::shared_ptr<trivial> m)
 	: manager_(m)
-	, link_(m->node_.io_service(), m->node_.context)
+	, link_(m->node_->io_service(), m->node_->context)
 	, tx_ready_(false)
 {}
 
@@ -265,6 +265,7 @@ void trivial::connection::accept(ip::tcp::acceptor& incoming)
 void trivial::connection::stop()
 {
 	link_.socket.lowest_layer().close();
+	manager_->connection_finished(shared_from_this());
 }
 
 const_buffer trivial::connection::generate_handshake()
@@ -387,8 +388,8 @@ void trivial::connection::handshake_received(const boost::system::error_code& er
 	receive_next_message();
 }
 
-trivial::request::request(local_node& node, boost::shared_ptr<content_sources> sources)
-	: sources_(sources), timeout_(node.io_service()), running_(false)
+trivial::request::request(boost::asio::io_service& ios, boost::shared_ptr<content_sources> sources)
+	: sources_(sources), timeout_(ios), running_(false)
 {
 }
 
@@ -438,16 +439,16 @@ void trivial::request::stop()
 	timeout_.cancel();
 }
 
-trivial::trivial(local_node& node)
+trivial::trivial(boost::shared_ptr<local_node> node)
 	: network_transport(0, node)
-	, acceptor_(node.io_service())
+	, acceptor_(node->io_service())
 	, running_(false)
 {
-//	acceptor_.set_option(ip::tcp::socket::reuse_address(true));
-	ip::tcp::endpoint listen_ep(ip::address::from_string(node.config().listen_ip()), node.config().listen_port() + 100);
+	ip::tcp::endpoint listen_ep(ip::address::from_string(node_->config().listen_ip()), node_->config().listen_port() + 100);
 
 	acceptor_.open(listen_ep.protocol());
-	for (;listen_ep.port() < node_.config().listen_port() + 200; listen_ep.port( listen_ep.port() + 1 )) {
+	acceptor_.set_option(ip::tcp::socket::reuse_address(true));
+	for (;listen_ep.port() < node_->config().listen_port() + 200; listen_ep.port( listen_ep.port() + 1 )) {
 		boost::system::error_code error;
 		acceptor_.bind(listen_ep, error);
 		if (!error) break;
@@ -473,7 +474,7 @@ void trivial::stop()
 
 ip::tcp::endpoint trivial::public_endpoint() const
 {
-	ip::tcp::endpoint ep(node_.public_endpoint());
+	ip::tcp::endpoint ep(node_->public_endpoint());
 	ep.port(acceptor_.local_endpoint().port());
 	return ep;
 }
@@ -483,12 +484,15 @@ bool trivial::is_connected(ip::tcp::endpoint ep)
 	return std::find_if(connections_.begin(), connections_.end(), connection_ep_comparator(ep)) != connections_.end();
 }
 
-void trivial::start_request(local_node& node, protocol_id pid, const content_identifier& cid, boost::shared_ptr<content_sources> sources)
+void trivial::start_request(protocol_id pid, const content_identifier& cid, boost::shared_ptr<content_sources> sources)
 {
+	if (!running_)
+		return;
+
 	auto req = requests_.insert(std::make_pair(std::make_pair(pid, cid), boost::shared_ptr<request>()));
 
 	if (req.second) {
-		req.first->second = boost::make_shared<request>(boost::ref(node), sources);
+		req.first->second = boost::make_shared<request>(boost::ref(node_->io_service()), sources);
 		req.first->second->start(shared_from_this(), pid, cid);
 	}
 }

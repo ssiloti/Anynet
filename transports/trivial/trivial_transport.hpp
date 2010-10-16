@@ -70,7 +70,7 @@ public:
 		friend class trivial;
 	public:
 		net_link& link() { return link_; }
-		const network_key& remote_id() { return id_; }
+		const network_key& remote_id() { return remote_identity_; }
 		const ip::tcp::endpoint& remote_endpoint() { return remote_public_endpoint_; }
 
 		connection(boost::shared_ptr<trivial> m);
@@ -110,7 +110,6 @@ public:
 		void handshake_received(const boost::system::error_code& error, std::size_t bytes_transferred);
 
 		net_link link_;
-		network_key id_;
 		std::deque<message> send_queue_;
 		boost::shared_ptr<trivial> manager_;
 		network_key remote_identity_;
@@ -122,7 +121,7 @@ public:
 	class request
 	{
 	public:
-		request(local_node& node, boost::shared_ptr<content_sources> sources);
+		request(boost::asio::io_service& ios, boost::shared_ptr<content_sources> sources);
 
 		bool failure(boost::shared_ptr<trivial> manager,
 		             const network_key& src,
@@ -149,7 +148,7 @@ public:
 		virtual ~upper_layer() {}
 	};
 
-	trivial(local_node& node);
+	trivial(boost::shared_ptr<local_node> node);
 
 	void start();
 	void stop();
@@ -157,7 +156,7 @@ public:
 	ip::tcp::endpoint public_endpoint() const;
 	bool is_connected(ip::tcp::endpoint ep);
 
-	void start_request(local_node& node, protocol_id pid, const content_identifier& cid, boost::shared_ptr<content_sources> sources);
+	void start_request(protocol_id pid, const content_identifier& cid, boost::shared_ptr<content_sources> sources);
 	void stop_request(protocol_id pid, const content_identifier& cid);
 
 	void register_upper_layer(protocol_id pid, boost::shared_ptr<upper_layer> upper);

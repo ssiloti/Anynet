@@ -80,7 +80,7 @@ void network_simulator::tick(const boost::system::error_code& error)
 		/*
 		for (std::vector<boost::shared_ptr<traffic_generator> >::iterator client = clients.begin(); client != clients.end(); ++client)
 			if ((*client))
-				verify_reverse_successor((*client)->node_.id(), (*client)->node_.self_predecessor());*/
+				verify_reverse_successor((*client)->node_->id(), (*client)->node_->self_predecessor());*/
 
 		if (clients.size() < target_node_count) {
 			clients.push_back(boost::shared_ptr<traffic_generator>(new traffic_generator(io_service, clients.size())));
@@ -137,7 +137,7 @@ bool network_simulator::node_created(const network_key& id)
 {
 	for (std::vector<boost::shared_ptr<traffic_generator> >::iterator client = clients.begin(); client != clients.end(); ++client) {
 		if (*client) {
-			if ((*client)->node_.id() == id)
+			if ((*client)->node_->id() == id)
 				return true;
 		}
 	}
@@ -147,7 +147,7 @@ bool network_simulator::node_created(const network_key& id)
 void network_simulator::verify_reverse_successor(const network_key& node, const network_key& rsuccessor)
 {
 	for (std::vector<boost::shared_ptr<traffic_generator> >::iterator client = clients.begin(); client != clients.end(); ++client) {
-		if ((*client) && (*client)->node_.id() != node && reverse_distance(node, (*client)->node_.id()) < reverse_distance(node, rsuccessor)) {
+		if ((*client) && (*client)->node_->id() != node && reverse_distance(node, (*client)->node_->id()) < reverse_distance(node, rsuccessor)) {
 			google::FlushLogFiles(google::INFO);
 			assert(false);
 		}

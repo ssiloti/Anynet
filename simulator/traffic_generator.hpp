@@ -44,8 +44,13 @@ class traffic_generator : public boost::enable_shared_from_this<traffic_generato
 {
 public:
 	traffic_generator(boost::asio::io_service& io_service, int id);
+	~traffic_generator()
+	{
+		node_->stop();
+	}
 
 	void tick(int time);
+
 public:
 
 	void hunk_received(const_payload_buffer_ptr content);
@@ -54,7 +59,7 @@ public:
 	int next_non_authoritative_get_;
 	int death_;
 	client_config config_;
-	local_node node_;
+	boost::shared_ptr<local_node> node_;
 };
 
 #endif
